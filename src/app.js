@@ -445,6 +445,45 @@ function startGame(chart, audioUrl) { if (state.game) state.game.stop(); state.g
 function returnToLauncher() { if (state.game) { state.game.stop(); state.game=null; } if (state.creator) { state.creator.stop(); state.creator=null; } $('gameView').classList.add('hidden'); $('launcher').classList.remove('hidden'); }
 
 
+function normalizeManualChords(notes, windowSec = 0.055) {
+  const ordered = notes.slice().sort((a, b) => (Number(a.time) || 0) - (Number(b.time) || 0) || (Number(a.lane) || 0) - (Number(b.lane) || 0));
+  let i = 0;
+  while (i < ordered.length) {
+    const group = [ordered[i]];
+    const start = Number(ordered[i].time) || 0;
+    let j = i + 1;
+    while (j < ordered.length && ((Number(ordered[j].time) || 0) - start) <= windowSec) {
+      group.push(ordered[j]);
+      j++;
+    }
+
+    const lanes = group.map(n => Number(n.lane));
+    const uniqueLaneCount = new Set(lanes).size;
+    if (group.length >= 2 && uniqueLaneCount === group.length) {
+      const times = group.map(n => Number(n.time) || 0).sort((a, b) => a - b);
+      const canonical = round4(times[Math.floor(times.length / 2)]);
+      for (const n of group) {
+        n.raw_time = n.raw_time ?? n.time;
+        n.time = canonical;
+        n.render_time = canonical;
+        n.chord_locked = true;
+      }
+
+      const holds = group.filter(n => n.type === 'hold' && Number.isFinite(Number(n.end_time)));
+      if (holds.length >= 2) {
+        const ends = holds.map(n => Number(n.end_time)).sort((a, b) => a - b);
+        if (ends[ends.length - 1] - ends[0] <= windowSec) {
+          const canonicalEnd = round4(ends[Math.floor(ends.length / 2)]);
+          for (const n of holds) n.end_time = Math.max(canonicalEnd, n.time + 3.0);
+        }
+      }
+    }
+    i = j;
+  }
+  return ordered.sort((a, b) => (Number(a.time) || 0) - (Number(b.time) || 0) || (Number(a.lane) || 0) - (Number(b.lane) || 0));
+}
+
+
 class ChartCreator {
   constructor(audioFile, options) {
     this.audioFile = audioFile;
@@ -554,9 +593,9 @@ class ChartCreator {
     const beat = 60 / this.bpm;
     const gridTimes = [];
     for (let t = 0; t <= duration + 0.001; t += beat / 2) gridTimes.push(round4(t));
-    const notes = removeHoldOverlaps(this.notes.slice().sort((a,b) => a.time - b.time || a.lane - b.lane));
+    const notes = removeHoldOverlaps(normalizeManualChords(this.notes.slice().sort((a,b) => a.time - b.time || a.lane - b.lane)));
     return {
-      version: 21,
+      version: 22,
       generator: 'Rhythm4G Online Manual Editor',
       title: this.title,
       audio_path: `music/${this.audioFile.name}`,

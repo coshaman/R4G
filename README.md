@@ -1,3 +1,7 @@
+# Rhythm4G Online v7
+
+- Manual chart editor now snaps very close multi-lane inputs into simultaneous chords.
+
 # Rhythm4G Online
 
 정적 웹으로 실행되는 Rhythm4G 플레이어입니다. 서버 없이 GitHub Pages에서 동작합니다.
