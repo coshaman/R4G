@@ -3,110 +3,108 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#0b1020" />
   <title>Rhythm4G Online</title>
   <link rel="stylesheet" href="src/styles.css" />
 </head>
 <body>
-  <div id="app">
+  <div id="app" class="app-shell">
     <header class="topbar">
       <div>
         <div class="brand">Rhythm4G <span>Online</span></div>
-        <div class="subbrand">JSON chart player · frontend only</div>
+        <div class="subtitle">Developer: 집돌이 페렐만 · Static GitHub Pages Build</div>
       </div>
-      <div class="status-pill" id="loadStatus">대기 중</div>
+      <button id="openSettingsBtn" class="ghost-btn">설정</button>
     </header>
 
-    <main class="layout" id="mainLayout">
-      <section class="panel library-panel">
-        <div class="panel-title">곡 / 채보 불러오기</div>
-        <p class="hint">서버 없이 브라우저에서만 동작합니다. 같은 디렉토리 파일은 manifest 또는 URL 파라미터로, 로컬 파일은 직접 선택해서 불러올 수 있습니다.</p>
-
-        <div class="load-grid">
-          <label class="file-card">
-            <span>채보 JSON</span>
-            <input id="chartFile" type="file" accept=".json,application/json" />
-          </label>
-          <label class="file-card">
-            <span>음악 파일</span>
-            <input id="audioFile" type="file" accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac" />
-          </label>
+    <main id="launcher" class="launcher">
+      <section class="hero-card">
+        <div>
+          <h1>GitHub에 올라간 곡/채보를 자동으로 불러옵니다.</h1>
+          <p>
+            <code>music/</code>, <code>charts/</code>에 파일을 push하면 GitHub Actions가
+            <code>manifest.json</code>을 만들고, 이 화면의 곡 목록이 자동 갱신됩니다.
+          </p>
         </div>
-
-        <div class="same-dir-box">
-          <div class="section-label">같은 디렉토리에서 가져오기</div>
-          <div class="inline-row">
-            <input id="chartUrl" placeholder="charts/song.hard.json" />
-            <input id="audioUrl" placeholder="music/song.mp3" />
-          </div>
-          <button id="loadUrlBtn" class="secondary-btn">경로로 불러오기</button>
-        </div>
-
-        <div class="manifest-box">
-          <div class="section-label">manifest.json 곡 목록</div>
-          <div class="manifest-list" id="manifestList"></div>
-          <button id="reloadManifestBtn" class="secondary-btn">manifest 다시 읽기</button>
+        <div class="status-box">
+          <div class="status-label">라이브러리 상태</div>
+          <div id="libraryStatus" class="status-value">manifest 로딩 중...</div>
         </div>
       </section>
 
-      <section class="panel settings-panel">
-        <div class="panel-title">전역 설정</div>
-        <div class="settings-grid">
-          <label>
-            <span>싱크 오프셋(ms)</span>
-            <input id="offsetInput" type="number" step="1" value="0" />
-          </label>
-          <label>
-            <span>노트 속도 배율</span>
-            <input id="speedInput" type="number" step="0.05" min="0.4" max="2.5" value="1.0" />
-          </label>
-          <label>
-            <span>BPM 수동 표시/그리드</span>
-            <input id="bpmInput" type="number" step="0.01" min="30" max="360" placeholder="자동" />
-          </label>
-          <label>
-            <span>ACC 방식</span>
-            <select id="accModeInput">
-              <option value="cumulative">누적</option>
-              <option value="from100">100% 시작</option>
-            </select>
-          </label>
-        </div>
-        <label class="toggle-row">
-          <input id="autoSyncInput" type="checkbox" />
-          <span>자동 싱크 사용</span>
-        </label>
-
-        <div class="key-panel">
-          <div class="section-label">키 설정</div>
-          <div class="key-grid">
-            <label>4키 <input id="keys4Input" value="D F J K" /></label>
-            <label>6키 <input id="keys6Input" value="S D F J K L" /></label>
-            <label>일시정지 <input id="pauseKeyInput" value="P" /></label>
-            <label>리트라이 <input id="retryKeyInput" value="Backspace" /></label>
+      <section class="grid-layout">
+        <section class="panel library-panel">
+          <div class="panel-head">
+            <div>
+              <h2>온라인 라이브러리</h2>
+              <p>GitHub repo의 <code>music/</code>, <code>charts/</code> 기반 목록</p>
+            </div>
+            <button id="refreshLibraryBtn" class="small-btn">새로고침</button>
           </div>
-          <button id="saveSettingsBtn" class="secondary-btn">설정 저장</button>
-        </div>
+          <div id="songList" class="song-list"></div>
+        </section>
 
-        <div class="song-info" id="songInfo">
-          <div class="empty-state">채보와 음악을 불러오면 정보가 표시됩니다.</div>
-        </div>
+        <aside class="panel side-panel">
+          <h2>로컬 파일로 플레이</h2>
+          <p>GitHub에 올리지 않은 개인 파일은 브라우저에서 직접 선택해서 플레이합니다.</p>
+          <label class="file-row">
+            <span>채보 JSON</span>
+            <input id="localChartInput" type="file" accept=".json,application/json" />
+          </label>
+          <label class="file-row">
+            <span>음악 파일</span>
+            <input id="localAudioInput" type="file" accept="audio/*,.mp3,.wav,.ogg,.flac,.m4a" />
+          </label>
+          <button id="playLocalBtn" class="primary-btn full">로컬 파일 플레이</button>
+          <div id="localStatus" class="hint"></div>
 
-        <button id="startBtn" class="primary-btn" disabled>플레이 시작</button>
+          <hr />
+
+          <h2>선택한 곡</h2>
+          <div id="selectedInfo" class="selected-info">아직 선택된 곡이 없습니다.</div>
+          <button id="playSelectedBtn" class="primary-btn full" disabled>선택한 채보 플레이</button>
+        </aside>
       </section>
     </main>
 
-    <section class="game-shell hidden" id="gameShell">
+    <section id="gameView" class="game-view hidden">
       <canvas id="gameCanvas" width="1280" height="720"></canvas>
-      <div class="touch-lanes" id="touchLanes"></div>
-      <div class="game-controls">
-        <button id="pauseBtn">Pause</button>
-        <button id="retryBtn">Retry</button>
-        <button id="backBtn">Back</button>
+      <div class="game-actions">
+        <button id="backToLauncherBtn" class="ghost-btn">목록으로</button>
       </div>
+      <div id="touchLanes" class="touch-lanes"></div>
     </section>
+
+    <dialog id="settingsDialog" class="settings-dialog">
+      <form method="dialog" class="settings-form">
+        <div class="dialog-head">
+          <h2>전역 설정</h2>
+          <button class="ghost-btn" value="close">닫기</button>
+        </div>
+        <div class="settings-grid">
+          <label>4키 배치 <input id="keys4Input" type="text" placeholder="D F J K" /></label>
+          <label>6키 배치 <input id="keys6Input" type="text" placeholder="S D F J K L" /></label>
+          <label>일시정지 키 <input id="pauseKeyInput" type="text" placeholder="P" /></label>
+          <label>리트라이 키 <input id="retryKeyInput" type="text" placeholder="Backspace" /></label>
+          <label>뒤로가기 키 <input id="backKeyInput" type="text" placeholder="Escape" /></label>
+          <label>전역 싱크(ms) <input id="offsetInput" type="number" step="1" /></label>
+          <label>노트 속도 배율 <input id="speedInput" type="number" step="0.05" min="0.3" max="3" /></label>
+          <label>BPM 수동값 <input id="bpmInput" type="number" step="0.01" min="0" placeholder="0 = 채보값 사용" /></label>
+          <label>ACC 방식
+            <select id="accModeInput">
+              <option value="cumulative">누적</option>
+              <option value="start100">100% 시작</option>
+            </select>
+          </label>
+          <label class="checkbox-line"><input id="autoSyncInput" type="checkbox" /> 자동 싱크</label>
+        </div>
+        <div class="dialog-actions">
+          <button id="resetSettingsBtn" class="small-btn" type="button">기본값</button>
+          <button id="saveSettingsBtn" class="primary-btn" value="default">저장</button>
+        </div>
+      </form>
+    </dialog>
   </div>
 
-  <script src="src/app.js" type="module"></script>
+  <script type="module" src="src/app.js"></script>
 </body>
 </html>

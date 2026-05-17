@@ -1,551 +1,444 @@
-const $ = (id) => document.getElementById(id);
+const DEFAULT_SETTINGS = {
+  keys4: ['D', 'F', 'J', 'K'],
+  keys6: ['S', 'D', 'F', 'J', 'K', 'L'],
+  pauseKey: 'P',
+  retryKey: 'Backspace',
+  backKey: 'Escape',
+  globalOffsetMs: 0,
+  speedMultiplier: 1.0,
+  manualBpm: 0,
+  accMode: 'cumulative',
+  autoSyncEnabled: true,
+};
 
+const JUDGE = { perfect: 0.050, great: 0.088, good: 0.130, bad: 0.180, miss: 0.210 };
+const SCORE_WEIGHT = { PERFECT: 1.0, GREAT: 0.8, GOOD: 0.5, BAD: 0.2, MISS: 0.0, RELEASE: 0.0 };
+const DIFF_ORDER = ['easy', 'normal', 'hard', 'extreme', 'master'];
+
+const $ = (id) => document.getElementById(id);
 const state = {
-  chart: null,
-  chartUrl: null,
-  audioBuffer: null,
-  audioObjectUrl: null,
-  audioUrl: null,
-  audioContext: null,
-  source: null,
-  gain: null,
-  startedAt: 0,
-  pausedAt: 0,
-  isPlaying: false,
-  isPaused: false,
+  manifest: null,
+  songs: [],
+  selected: null,
+  localChart: null,
+  localAudio: null,
   settings: loadSettings(),
   game: null,
 };
 
-const JUDGE = {
-  perfect: 0.050,
-  great: 0.088,
-  good: 0.130,
-  bad: 0.180,
-  miss: 0.210,
-  earlyBad: 0.285,
-};
-const WEIGHT = { PERFECT: 1, GREAT: 0.82, GOOD: 0.55, BAD: 0.18, MISS: 0 };
+function loadSettings() {
+  try {
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem('rhythm4g_online_settings') || '{}') };
+  } catch { return { ...DEFAULT_SETTINGS }; }
+}
+function saveSettings() {
+  localStorage.setItem('rhythm4g_online_settings', JSON.stringify(state.settings));
+}
+function parseKeys(text, fallback) {
+  const arr = String(text || '').split(/[ ,/]+/).map(s => s.trim()).filter(Boolean).map(s => normalizeKeyName(s));
+  return arr.length ? arr : fallback;
+}
+function normalizeKeyName(k) {
+  const s = String(k || '').trim();
+  if (!s) return '';
+  const lower = s.toLowerCase();
+  if (lower === 'esc') return 'Escape';
+  if (lower === 'space') return ' ';
+  if (lower === 'backspace' || lower === 'bksp') return 'Backspace';
+  if (lower === 'enter' || lower === 'return') return 'Enter';
+  return s.length === 1 ? s.toUpperCase() : s;
+}
+function keyMatches(event, wanted) {
+  const w = normalizeKeyName(wanted);
+  const physical = event.code?.startsWith('Key') ? event.code.slice(3).toUpperCase() : event.code;
+  const logical = event.key?.length === 1 ? event.key.toUpperCase() : event.key;
+  return w === logical || w === physical || w === event.code;
+}
+function setStatus(text) { $('libraryStatus').textContent = text; }
 
-function loadSettings(){
-  const defaults = {
-    offsetMs: 0,
-    speedMultiplier: 1.0,
-    manualBpm: "",
-    autoSync: false,
-    accMode: "cumulative",
-    keys4: ["D","F","J","K"],
-    keys6: ["S","D","F","J","K","L"],
-    pauseKey: "P",
-    retryKey: "Backspace",
-  };
-  try { return { ...defaults, ...JSON.parse(localStorage.getItem("rhythm4g.online.settings") || "{}") }; }
-  catch { return defaults; }
+function settingsToUI() {
+  $('keys4Input').value = state.settings.keys4.join(' ');
+  $('keys6Input').value = state.settings.keys6.join(' ');
+  $('pauseKeyInput').value = state.settings.pauseKey;
+  $('retryKeyInput').value = state.settings.retryKey;
+  $('backKeyInput').value = state.settings.backKey;
+  $('offsetInput').value = state.settings.globalOffsetMs;
+  $('speedInput').value = state.settings.speedMultiplier;
+  $('bpmInput').value = state.settings.manualBpm || '';
+  $('accModeInput').value = state.settings.accMode;
+  $('autoSyncInput').checked = !!state.settings.autoSyncEnabled;
 }
-function saveSettings(){
-  state.settings.offsetMs = Number($("offsetInput").value || 0);
-  state.settings.speedMultiplier = Number($("speedInput").value || 1);
-  state.settings.manualBpm = $("bpmInput").value.trim();
-  state.settings.autoSync = $("autoSyncInput").checked;
-  state.settings.accMode = $("accModeInput").value;
-  state.settings.keys4 = parseKeys($("keys4Input").value, ["D","F","J","K"]);
-  state.settings.keys6 = parseKeys($("keys6Input").value, ["S","D","F","J","K","L"]);
-  state.settings.pauseKey = normalizeKeyName($("pauseKeyInput").value || "P");
-  state.settings.retryKey = normalizeKeyName($("retryKeyInput").value || "Backspace");
-  localStorage.setItem("rhythm4g.online.settings", JSON.stringify(state.settings));
-  setStatus("설정 저장됨");
-}
-function applySettingsToUI(){
-  $("offsetInput").value = state.settings.offsetMs;
-  $("speedInput").value = state.settings.speedMultiplier;
-  $("bpmInput").value = state.settings.manualBpm || "";
-  $("autoSyncInput").checked = !!state.settings.autoSync;
-  $("accModeInput").value = state.settings.accMode;
-  $("keys4Input").value = state.settings.keys4.join(" ");
-  $("keys6Input").value = state.settings.keys6.join(" ");
-  $("pauseKeyInput").value = state.settings.pauseKey;
-  $("retryKeyInput").value = state.settings.retryKey;
-}
-function parseKeys(text, fallback){
-  const xs = text.split(/[ ,/]+/).map(normalizeKeyName).filter(Boolean);
-  return xs.length ? xs : fallback;
-}
-function normalizeKeyName(k){
-  if (!k) return "";
-  const t = String(k).trim();
-  if (!t) return "";
-  if (t.length === 1) return t.toUpperCase();
-  const lower = t.toLowerCase();
-  const aliases = { esc:"Escape", escape:"Escape", space:"Space", backspace:"Backspace", enter:"Enter", return:"Enter", shift:"Shift", ctrl:"Control", control:"Control" };
-  return aliases[lower] || t;
-}
-function setStatus(text){ $("loadStatus").textContent = text; }
-
-async function readJsonFile(file){ return JSON.parse(await file.text()); }
-async function loadAudioFromFile(file){
-  cleanupAudioUrl();
-  state.audioObjectUrl = URL.createObjectURL(file);
-  state.audioUrl = state.audioObjectUrl;
-  await decodeAudioFromUrl(state.audioUrl);
-}
-async function decodeAudioFromUrl(url){
-  const ctx = getAudioContext();
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`음악 파일을 읽을 수 없습니다: ${url}`);
-  const data = await res.arrayBuffer();
-  state.audioBuffer = await ctx.decodeAudioData(data);
-}
-function getAudioContext(){
-  if (!state.audioContext) state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-  return state.audioContext;
-}
-function cleanupAudioUrl(){
-  if (state.audioObjectUrl) URL.revokeObjectURL(state.audioObjectUrl);
-  state.audioObjectUrl = null;
+function uiToSettings() {
+  state.settings.keys4 = parseKeys($('keys4Input').value, DEFAULT_SETTINGS.keys4);
+  state.settings.keys6 = parseKeys($('keys6Input').value, DEFAULT_SETTINGS.keys6);
+  state.settings.pauseKey = normalizeKeyName($('pauseKeyInput').value || DEFAULT_SETTINGS.pauseKey);
+  state.settings.retryKey = normalizeKeyName($('retryKeyInput').value || DEFAULT_SETTINGS.retryKey);
+  state.settings.backKey = normalizeKeyName($('backKeyInput').value || DEFAULT_SETTINGS.backKey);
+  state.settings.globalOffsetMs = Number($('offsetInput').value || 0);
+  state.settings.speedMultiplier = Math.max(0.3, Math.min(3, Number($('speedInput').value || 1)));
+  state.settings.manualBpm = Number($('bpmInput').value || 0);
+  state.settings.accMode = $('accModeInput').value;
+  state.settings.autoSyncEnabled = $('autoSyncInput').checked;
+  saveSettings();
 }
 
-function normalizeChart(chart){
-  const notes = Array.isArray(chart.notes) ? chart.notes : [];
-  const cleaned = notes.map((n, i) => ({
-    id: n.id ?? `n${i}`,
-    type: n.type || "tap",
-    lane: Number.isFinite(Number(n.lane)) ? Number(n.lane) : 0,
-    time: Number(n.render_time ?? n.time ?? 0),
-    end_time: Number(n.end_time ?? n.endTime ?? n.time ?? 0),
-    required_hits: Number(n.required_hits ?? n.requiredHits ?? 0),
-    scroll_speed: Number(n.visual_scroll_speed ?? n.scroll_speed ?? chart.scroll_speed ?? 760),
-    color: n.color || "normal",
-    judged: false,
-    active: false,
-    broken: false,
-    ticks: [],
-    remaining: Number(n.required_hits ?? n.requiredHits ?? 0),
-  })).filter(n => Number.isFinite(n.time));
-
-  // Hard safety: remove any same-lane tap inside hold intervals.
-  const holds = cleaned.filter(n => n.type === "hold" && n.end_time > n.time);
-  const filtered = cleaned.filter(n => {
-    if (n.type === "hold") return true;
-    if (n.type === "roll") {
-      return !holds.some(h => n.time < h.end_time + 0.04 && (n.end_time || n.time) > h.time - 0.04);
+async function loadManifest() {
+  setStatus('manifest 로딩 중...');
+  try {
+    const res = await fetch(`manifest.json?ts=${Date.now()}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const manifest = await res.json();
+    state.manifest = manifest;
+    state.songs = normalizeManifest(manifest);
+    renderSongs();
+    setStatus(`${state.songs.length}곡 로드됨`);
+  } catch (err) {
+    state.songs = [];
+    renderSongs();
+    setStatus('manifest 없음');
+    $('songList').innerHTML = `<div class="song-card"><div class="song-title">온라인 곡 목록이 없습니다.</div><div class="song-meta">GitHub Actions가 manifest.json을 만들도록 설정하거나, scripts/generate_manifest.py를 실행해 주세요.<br>${String(err.message || err)}</div></div>`;
+  }
+}
+function normalizeManifest(manifest) {
+  const raw = Array.isArray(manifest?.songs) ? manifest.songs : [];
+  return raw.map((song, idx) => {
+    const charts = song.charts || {};
+    const diffs = Object.keys(charts).sort((a,b) => DIFF_ORDER.indexOf(a) - DIFF_ORDER.indexOf(b));
+    return { id: song.id || `song-${idx}`, title: song.title || song.name || `Song ${idx + 1}`, audio: song.audio || song.audio_path, duration: song.duration, bpm: song.bpm || song.tempo_bpm, charts, diffs };
+  }).filter(s => s.audio && s.diffs.length);
+}
+function renderSongs() {
+  const root = $('songList');
+  root.innerHTML = '';
+  for (const song of state.songs) {
+    const el = document.createElement('article');
+    el.className = 'song-card';
+    const meta = [`BPM ${song.bpm ? Number(song.bpm).toFixed(2) : '-'}`, song.duration ? `${Number(song.duration).toFixed(1)}s` : '', `${song.diffs.length}개 난이도`].filter(Boolean).join(' · ');
+    el.innerHTML = `<div class="song-title"></div><div class="song-meta"></div><div class="diff-row"></div>`;
+    el.querySelector('.song-title').textContent = song.title;
+    el.querySelector('.song-meta').textContent = meta;
+    const row = el.querySelector('.diff-row');
+    for (const diff of song.diffs) {
+      const btn = document.createElement('button');
+      btn.className = 'diff-btn';
+      btn.textContent = diff;
+      btn.onclick = () => selectSong(song, diff, btn);
+      row.appendChild(btn);
     }
-    return !holds.some(h => n.lane === h.lane && n.time >= h.time - 0.045 && n.time <= h.end_time + 0.045);
+    root.appendChild(el);
+  }
+}
+function selectSong(song, difficulty, btn) {
+  document.querySelectorAll('.diff-btn.selected').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  state.selected = { song, difficulty, chartUrl: song.charts[difficulty], audioUrl: song.audio };
+  $('selectedInfo').innerHTML = `<strong>${escapeHtml(song.title)}</strong><br>난이도: ${difficulty}<br>audio: ${escapeHtml(song.audio)}<br>chart: ${escapeHtml(song.charts[difficulty])}`;
+  $('playSelectedBtn').disabled = false;
+}
+function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+async function playSelected() {
+  if (!state.selected) return;
+  const chart = await (await fetch(state.selected.chartUrl)).json();
+  const audioUrl = state.selected.audioUrl;
+  startGame(chart, audioUrl);
+}
+async function playLocal() {
+  if (!state.localChart || !state.localAudio) {
+    $('localStatus').textContent = '채보 JSON과 음악 파일을 모두 선택해야 합니다.';
+    return;
+  }
+  const text = await state.localChart.text();
+  const chart = JSON.parse(text);
+  const audioUrl = URL.createObjectURL(state.localAudio);
+  startGame(chart, audioUrl, true);
+}
+
+function normalizeChart(chart) {
+  const c = structuredClone(chart);
+  c.notes = Array.isArray(c.notes) ? c.notes : [];
+  for (const n of c.notes) {
+    n.type = n.type || 'tap';
+    n.time = Number(n.render_time ?? n.time ?? 0);
+    n.end_time = Number(n.end_time ?? n.endTime ?? n.time ?? 0);
+    n.lane = Number.isFinite(Number(n.lane)) ? Number(n.lane) : 0;
+    n.required_hits = Number(n.required_hits ?? n.requiredHits ?? 15);
+    n.scroll_speed = Number(n.visual_scroll_speed ?? n.scroll_speed ?? c.scroll_speed ?? 800);
+    n.hit = false; n.missed = false; n.started = false; n.broken = false; n.rollHits = 0; n.tickIndex = 0;
+  }
+  c.notes.sort((a,b) => a.time - b.time || a.lane - b.lane);
+  const laneCount = Number(c.lane_count || c.lanes || (c.difficulty === 'master' ? 6 : 4));
+  c.lane_count = laneCount;
+  c.notes = removeHoldOverlaps(c.notes);
+  return c;
+}
+function removeHoldOverlaps(notes) {
+  const holds = notes.filter(n => n.type === 'hold');
+  return notes.filter(n => {
+    if (n.type === 'hold') return true;
+    if (n.type === 'roll') {
+      return !holds.some(h => rangesOverlap(n.time, n.end_time, h.time - 0.05, h.end_time + 0.05));
+    }
+    return !holds.some(h => n.lane === h.lane && n.time >= h.time - 0.06 && n.time <= h.end_time + 0.06);
   });
-
-  for (const h of filtered.filter(n=>n.type === "hold")) {
-    const interval = Number(h.tick_interval || chart.beat_interval / 2 || 0.25);
-    for (let t = h.time + interval; t < h.end_time - 0.05; t += interval) {
-      h.ticks.push({ time: t, judged: false });
-    }
-  }
-
-  chart.notes = filtered.sort((a,b)=> a.time - b.time || a.lane - b.lane);
-  chart.lane_count = Number(chart.lane_count || (chart.difficulty === "master" ? 6 : 4));
-  if (!Number.isFinite(chart.lane_count) || chart.lane_count < 1) chart.lane_count = 4;
-  chart.duration = Number(chart.duration || state.audioBuffer?.duration || 0);
-  return chart;
 }
-
-function updateSongInfo(){
-  const info = $("songInfo");
-  if (!state.chart) { info.innerHTML = `<div class="empty-state">채보와 음악을 불러오면 정보가 표시됩니다.</div>`; return; }
-  const c = state.chart;
-  info.innerHTML = `
-    <div class="song-title">${escapeHtml(c.title || "Untitled")}</div>
-    <div class="song-meta">
-      <div>난이도: <b>${escapeHtml(c.difficulty || "unknown")}</b></div>
-      <div>레인: <b>${c.lane_count}</b></div>
-      <div>BPM: <b>${Number(c.tempo_bpm || 0).toFixed(2)}</b></div>
-      <div>노트: <b>${c.notes?.length || 0}</b></div>
-    </div>`;
-  $("startBtn").disabled = !(state.chart && state.audioBuffer);
-}
-function escapeHtml(s){ return String(s).replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch])); }
-
-async function loadUrl(chartUrl, audioUrl){
-  setStatus("경로 로딩 중...");
-  const chartRes = await fetch(chartUrl, { cache:"no-store" });
-  if (!chartRes.ok) throw new Error(`채보를 읽을 수 없습니다: ${chartUrl}`);
-  state.chart = normalizeChart(await chartRes.json());
-  state.chartUrl = chartUrl;
-  await decodeAudioFromUrl(audioUrl);
-  state.audioUrl = audioUrl;
-  updateSongInfo();
-  setStatus("로드 완료");
-}
-
-function normalizePath(p){ return String(p || "").replace(/\\/g, "/").replace(/^\.\//, ""); }
-function difficultyRank(d){ return {easy:0, normal:1, hard:2, extreme:3, master:4}[String(d||"").toLowerCase()] ?? 99; }
-function guessDifficultyFromPath(path){
-  const name = normalizePath(path).split("/").pop() || path;
-  const m = name.match(/\.(easy|normal|hard|extreme|master)\.json$/i);
-  return m ? m[1].toLowerCase() : "chart";
-}
-async function fetchJsonMaybe(path){
-  const res = await fetch(path, { cache:"no-store" });
-  if (!res.ok) throw new Error(`${path} 로드 실패`);
-  return await res.json();
-}
-async function tryDirectoryListing(dir, exts){
-  try {
-    const res = await fetch(dir, { cache:"no-store" });
-    if (!res.ok) return [];
-    const html = await res.text();
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    const files = [...doc.querySelectorAll("a")]
-      .map(a => a.getAttribute("href") || "")
-      .map(h => decodeURIComponent(h.split("?")[0].split("#")[0]))
-      .filter(h => h && !h.startsWith("../") && !h.endsWith("/"))
-      .filter(h => exts.some(ext => h.toLowerCase().endsWith(ext)))
-      .map(h => normalizePath(dir + h.split("/").pop()));
-    return [...new Set(files)];
-  } catch { return []; }
-}
-function basenameNoExt(path){
-  const name = normalizePath(path).split("/").pop() || path;
-  return name.replace(/\.[^.]+$/, "");
-}
-function stripDifficultySuffix(name){
-  return name.replace(/\.(easy|normal|hard|extreme|master)$/i, "");
-}
-async function buildManifestFromDirectoryListing(){
-  const [audioFiles, chartFiles] = await Promise.all([
-    tryDirectoryListing("music/", [".mp3", ".wav", ".ogg", ".m4a", ".flac"]),
-    tryDirectoryListing("charts/", [".json"]),
-  ]);
-  if (!audioFiles.length && !chartFiles.length) return null;
-
-  const audioByStem = new Map(audioFiles.map(p => [basenameNoExt(p), p]));
-  const groups = new Map();
-  for (const chartPath of chartFiles) {
-    let meta = {};
-    try { meta = await fetchJsonMaybe(chartPath); } catch {}
-    const chartStem = stripDifficultySuffix(basenameNoExt(chartPath));
-    const audioPath = normalizePath(meta.audio_path || audioByStem.get(chartStem) || `music/${chartStem}.mp3`);
-    const key = audioPath || chartStem;
-    if (!groups.has(key)) groups.set(key, { title: meta.title || chartStem, audio: audioPath, charts: [] });
-    const song = groups.get(key);
-    song.title = song.title || meta.title || chartStem;
-    song.charts.push({
-      difficulty: meta.difficulty || guessDifficultyFromPath(chartPath),
-      path: chartPath,
-      bpm: meta.tempo_bpm,
-      notes: Array.isArray(meta.notes) ? meta.notes.length : undefined,
-    });
-  }
-  const songs = [...groups.values()].map(s => ({ ...s, charts: s.charts.sort((a,b)=>difficultyRank(a.difficulty)-difficultyRank(b.difficulty)) }));
-  return { generated_by: "directory-listing", songs };
-}
-function renderManifestSongs(songs, sourceLabel){
-  const box = $("manifestList");
-  box.innerHTML = "";
-  if (!songs.length) {
-    box.innerHTML = `<div class="manifest-item"><small>곡이 없습니다. music/와 charts/에 파일을 넣고 manifest를 생성하세요.</small></div>`;
-    return;
-  }
-  const source = document.createElement("div");
-  source.className = "manifest-source";
-  source.textContent = sourceLabel;
-  box.appendChild(source);
-  for (const s of songs) {
-    const item = document.createElement("div");
-    item.className = "manifest-item song-card";
-    const title = document.createElement("div");
-    title.className = "manifest-song-title";
-    title.innerHTML = `<b>${escapeHtml(s.title || s.audio || "Untitled")}</b><small>${escapeHtml(s.audio || "음악 경로 없음")}</small>`;
-    const buttons = document.createElement("div");
-    buttons.className = "difficulty-buttons";
-    const charts = (Array.isArray(s.charts) ? s.charts : []).slice().sort((a,b)=>difficultyRank(a.difficulty)-difficultyRank(b.difficulty));
-    for (const c of charts) {
-      const btn = document.createElement("button");
-      const label = c.difficulty || guessDifficultyFromPath(c.path || "");
-      btn.textContent = label;
-      btn.title = c.path || "";
-      btn.onclick = async () => {
-        if (!c.path) return alert("chart path가 없습니다.");
-        if (!s.audio) return alert("audio path가 없습니다. manifest 또는 chart의 audio_path를 확인하세요.");
-        try { await loadUrl(c.path, s.audio); }
-        catch(e){ alert(e.message); setStatus("로드 실패"); }
-      };
-      buttons.appendChild(btn);
-    }
-    if (!charts.length) buttons.innerHTML = `<small>채보 없음</small>`;
-    item.appendChild(title); item.appendChild(buttons); box.appendChild(item);
-  }
-}
-async function loadManifest(){
-  const box = $("manifestList");
-  box.innerHTML = `<div class="manifest-item"><small>music/ · charts/ 목록 읽는 중...</small></div>`;
-  try {
-    const res = await fetch("manifest.json", { cache:"no-store" });
-    if (res.ok) {
-      const data = await res.json();
-      const songs = Array.isArray(data.songs) ? data.songs : [];
-      renderManifestSongs(songs, "manifest.json에서 자동 로드됨");
-      return;
-    }
-  } catch {}
-
-  const dirManifest = await buildManifestFromDirectoryListing();
-  if (dirManifest) {
-    renderManifestSongs(dirManifest.songs || [], "디렉터리 목록에서 자동 감지됨 · GitHub Pages에서는 manifest.json 생성 필요");
-    return;
-  }
-
-  box.innerHTML = `<div class="manifest-item"><small>자동 목록을 읽지 못했습니다. GitHub Pages에서는 scripts/generate_manifest.py 또는 제공된 GitHub Actions가 생성한 manifest.json이 필요합니다.</small></div>`;
-}
-
+function rangesOverlap(a1, a2, b1, b2) { return Math.max(a1, b1) <= Math.min(a2, b2); }
 
 class RhythmGame {
-  constructor(canvas, chart, audioBuffer, settings){
-    this.canvas = canvas; this.ctx = canvas.getContext("2d");
-    this.chart = JSON.parse(JSON.stringify(chart));
-    this.audioBuffer = audioBuffer; this.settings = JSON.parse(JSON.stringify(settings));
-    this.laneCount = Number(this.chart.lane_count || 4);
-    this.keys = (this.laneCount >= 6 ? this.settings.keys6 : this.settings.keys4).slice(0, this.laneCount);
-    this.keyToLane = new Map(this.keys.map((k,i)=>[normalizeKeyName(k),i]));
-    this.held = new Array(this.laneCount).fill(false);
-    this.holdByLane = new Array(this.laneCount).fill(null);
+  constructor(chart, audioUrl) {
+    this.chart = normalizeChart(chart);
+    this.audioUrl = audioUrl;
+    this.canvas = $('gameCanvas');
+    this.ctx = this.canvas.getContext('2d');
+    this.audio = new Audio(audioUrl);
+    this.audio.preload = 'auto';
+    this.audio.crossOrigin = 'anonymous';
+    this.startedAt = 0;
+    this.paused = false;
+    this.laneHeld = Array(this.chart.lane_count).fill(false);
+    this.activeHolds = new Map();
     this.scoreUnits = this.computeScoreUnits();
-    this.scoreValue = 0; this.combo = 0; this.maxCombo = 0;
-    this.judgeCounts = { PERFECT:0, GREAT:0, GOOD:0, BAD:0, MISS:0 };
-    this.lastJudge = ""; this.lastJudgeAt = 0; this.autosyncText=""; this.autosyncAt=0;
-    this.autoSamples=[]; this.autoAdjustments=0; this.runtimeOffset=0; this.lastAutoAt=-999;
-    this.hitBursts=[]; this.running=true; this.paused=false; this.pauseSongTime=0;
-    this.resize(); this.bind(); this.start();
+    this.hitUnits = 0;
+    this.combo = 0; this.maxCombo = 0; this.score = 0;
+    this.counts = { PERFECT: 0, GREAT: 0, GOOD: 0, BAD: 0, MISS: 0, RELEASE: 0 };
+    this.judgeText = ''; this.judgeUntil = 0;
+    this.autoSamples = []; this.autoAdjust = 0; this.autoCount = 0; this.lastAutoAt = 0;
+    this.finished = false;
+    this._raf = null;
+    this.boundKeyDown = e => this.onKeyDown(e);
+    this.boundKeyUp = e => this.onKeyUp(e);
+    this.boundTouchStart = e => this.onTouchStart(e);
+    this.boundTouchEnd = e => this.onTouchEnd(e);
+    this.boundResizeTouch = () => this.updateTouchLaneGeometry();
   }
-  computeScoreUnits(){
-    let units=0;
+  computeScoreUnits() {
+    let units = 0;
+    const beat = 60 / (state.settings.manualBpm || this.chart.tempo_bpm || 120);
     for (const n of this.chart.notes) {
-      if (n.type === "hold") units += 2 + (n.ticks?.length || 0);
+      if (n.type === 'hold') units += 2 + Math.max(1, Math.floor((n.end_time - n.time) / Math.max(0.15, beat / 2)));
       else units += 1;
     }
     return Math.max(1, units);
   }
-  resize(){
-    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-    this.canvas.width = Math.floor(innerWidth*dpr); this.canvas.height = Math.floor(innerHeight*dpr);
-    this.ctx.setTransform(dpr,0,0,dpr,0,0); this.w=innerWidth; this.h=innerHeight;
-    this.playTop = Math.max(112, this.h*0.16); this.judgeY = this.h - Math.max(112, this.h*0.18);
-    this.playLeft = Math.max(16, this.w*0.18); this.playRight = this.w - Math.max(16, this.w*0.18);
-    if (this.w < 760) { this.playLeft = 10; this.playRight = this.w-10; this.playTop = 96; }
-    this.laneW = (this.playRight-this.playLeft)/this.laneCount;
+  async start() {
+    $('launcher').classList.add('hidden');
+    $('gameView').classList.remove('hidden');
+    buildTouchLanes(this.chart.lane_count);
+    this.updateTouchLaneGeometry();
+    requestAnimationFrame(() => this.updateTouchLaneGeometry());
+    window.addEventListener('resize', this.boundResizeTouch);
+    window.addEventListener('keydown', this.boundKeyDown);
+    window.addEventListener('keyup', this.boundKeyUp);
+    $('touchLanes').addEventListener('touchstart', this.boundTouchStart, { passive: false });
+    $('touchLanes').addEventListener('touchend', this.boundTouchEnd, { passive: false });
+    $('touchLanes').addEventListener('touchcancel', this.boundTouchEnd, { passive: false });
+    await this.audio.play();
+    this.loop();
   }
-  bind(){
-    this.onKeyDown = (e) => {
-      const key = normalizeKeyName(e.key);
-      if (key === this.settings.pauseKey) { e.preventDefault(); this.togglePause(); return; }
-      if (key === this.settings.retryKey) { e.preventDefault(); this.retry(); return; }
-      const lane = this.keyToLane.get(key) ?? this.keyToLane.get(normalizeKeyName(e.code?.replace(/^Key/,"")));
-      if (lane !== undefined && !e.repeat) { e.preventDefault(); this.pressLane(lane); }
-    };
-    this.onKeyUp = (e) => {
-      const key = normalizeKeyName(e.key);
-      const lane = this.keyToLane.get(key) ?? this.keyToLane.get(normalizeKeyName(e.code?.replace(/^Key/,"")));
-      if (lane !== undefined) { e.preventDefault(); this.releaseLane(lane); }
-    };
-    addEventListener("keydown", this.onKeyDown); addEventListener("keyup", this.onKeyUp); addEventListener("resize", ()=>this.resize());
-    buildTouchLanes(this.laneCount, (lane)=>this.pressLane(lane), (lane)=>this.releaseLane(lane));
+  stop() {
+    cancelAnimationFrame(this._raf);
+    this.audio.pause();
+    window.removeEventListener('keydown', this.boundKeyDown);
+    window.removeEventListener('keyup', this.boundKeyUp);
+    window.removeEventListener('resize', this.boundResizeTouch);
+    $('touchLanes').removeEventListener('touchstart', this.boundTouchStart);
+    $('touchLanes').removeEventListener('touchend', this.boundTouchEnd);
+    $('touchLanes').removeEventListener('touchcancel', this.boundTouchEnd);
   }
-  unbind(){ removeEventListener("keydown", this.onKeyDown); removeEventListener("keyup", this.onKeyUp); }
-  start(){
-    const ctx = getAudioContext();
-    if (ctx.state === "suspended") ctx.resume();
-    this.source = ctx.createBufferSource(); this.source.buffer = this.audioBuffer;
-    this.gain = ctx.createGain(); this.gain.gain.value = 0.95;
-    this.source.connect(this.gain).connect(ctx.destination);
-    this.startedAt = ctx.currentTime + 0.7;
-    this.source.start(this.startedAt);
-    this.source.onended = () => { if(this.running) this.finish(); };
-    requestAnimationFrame(()=>this.loop());
+  updateTouchLaneGeometry() {
+    const canvasRect = this.canvas.getBoundingClientRect();
+    const touchRoot = $('touchLanes');
+    if (!canvasRect.width || !canvasRect.height) return;
+
+    // Canvas rendering uses playX = width * 0.18 and playW = width * 0.64.
+    // The mobile touch overlay must use the exact same rectangle; otherwise
+    // a tap on the visible lane can be interpreted as a neighboring lane.
+    const playLeft = canvasRect.left + canvasRect.width * 0.18;
+    const playWidth = canvasRect.width * 0.64;
+    const judgeTop = canvasRect.top + canvasRect.height * 0.68;
+    const playBottom = canvasRect.bottom;
+
+    touchRoot.style.left = `${playLeft}px`;
+    touchRoot.style.width = `${playWidth}px`;
+    touchRoot.style.top = `${judgeTop}px`;
+    touchRoot.style.height = `${Math.max(96, playBottom - judgeTop)}px`;
+    touchRoot.style.bottom = 'auto';
+    touchRoot.style.transform = 'none';
   }
-  songTime(){
-    if (this.paused) return this.pauseSongTime;
-    const base = getAudioContext().currentTime - this.startedAt;
-    return base + (Number(this.settings.offsetMs || 0) + this.runtimeOffset)/1000;
+  restart() { const chart = this.chart, audio = this.audioUrl; this.stop(); startGame(chart, audio); }
+  songTime() { return this.audio.currentTime + (state.settings.globalOffsetMs + this.autoAdjust) / 1000; }
+  onKeyDown(e) {
+    if (keyMatches(e, state.settings.backKey)) { e.preventDefault(); returnToLauncher(); return; }
+    if (keyMatches(e, state.settings.pauseKey)) { e.preventDefault(); this.togglePause(); return; }
+    if (keyMatches(e, state.settings.retryKey)) { e.preventDefault(); this.restart(); return; }
+    const lane = this.keyToLane(e);
+    if (lane >= 0 && !e.repeat) { e.preventDefault(); this.pressLane(lane); }
   }
-  visualTime(){ return this.paused ? this.pauseSongTime : getAudioContext().currentTime - this.startedAt; }
-  togglePause(){
-    if (!this.running) return;
-    const ctx = getAudioContext();
-    if (!this.paused) { this.pauseSongTime=this.songTime(); ctx.suspend(); this.paused=true; }
-    else { ctx.resume(); this.startedAt = ctx.currentTime - this.pauseSongTime + (Number(this.settings.offsetMs || 0) + this.runtimeOffset)/1000; this.paused=false; }
+  onKeyUp(e) { const lane = this.keyToLane(e); if (lane >= 0) { e.preventDefault(); this.releaseLane(lane); } }
+  keyToLane(e) {
+    const keys = this.chart.lane_count >= 6 ? state.settings.keys6 : state.settings.keys4;
+    return keys.findIndex(k => keyMatches(e, k));
   }
-  retry(){ this.destroy(); startGame(); }
-  destroy(){
-    this.running=false; this.unbind(); try{ this.source?.stop(); }catch{}; getAudioContext().resume();
+  onTouchStart(e) {
+    e.preventDefault();
+    for (const t of e.changedTouches) this.pressLane(this.touchToLane(t));
   }
-  finish(){ this.running=false; this.drawResult(); }
-  loop(){ if(!this.running) return; this.update(); this.draw(); requestAnimationFrame(()=>this.loop()); }
-  update(){ if(this.paused) return; const t=this.songTime(); this.updateMisses(t); this.updateHoldTicks(t); }
-  addScore(judge){
-    this.judgeCounts[judge] = (this.judgeCounts[judge] || 0) + 1;
-    this.scoreValue += WEIGHT[judge] || 0;
-    if (judge === "MISS" || judge === "BAD") this.combo=0; else { this.combo++; this.maxCombo=Math.max(this.maxCombo,this.combo); }
-    this.lastJudge=judge; this.lastJudgeAt=performance.now();
+  onTouchEnd(e) {
+    e.preventDefault();
+    for (const t of e.changedTouches) this.releaseLane(this.touchToLane(t));
   }
-  score(){ return Math.round(1000000 * this.scoreValue / this.scoreUnits); }
-  acc(){
-    const judged = Object.values(this.judgeCounts).reduce((a,b)=>a+b,0);
-    if (this.settings.accMode === "from100") {
-      if (!judged) return 100;
-      return 100 * this.scoreValue / judged;
+  touchToLane(t) {
+    // Use the same lane rectangle as rendering. This keeps touch detection
+    // aligned even if CSS layout, mobile browser chrome, or orientation changes.
+    const canvasRect = this.canvas.getBoundingClientRect();
+    const playLeft = canvasRect.left + canvasRect.width * 0.18;
+    const playWidth = canvasRect.width * 0.64;
+    const x = Math.max(0, Math.min(playWidth - 1, t.clientX - playLeft));
+    return Math.floor(x / playWidth * this.chart.lane_count);
+  }
+  togglePause() {
+    this.paused = !this.paused;
+    if (this.paused) this.audio.pause(); else this.audio.play();
+  }
+  pressLane(lane) {
+    this.laneHeld[lane] = true;
+    document.querySelectorAll('.touch-lane')[lane]?.classList.add('active');
+    const t = this.songTime();
+    const roll = this.chart.notes.find(n => n.type === 'roll' && !n.hit && !n.missed && t >= n.time && t <= n.end_time);
+    if (roll) { roll.rollHits += 1; this.flash(`ROLL ${Math.max(0, roll.required_hits - roll.rollHits)}`); if (roll.rollHits >= roll.required_hits) this.applyJudgment(roll, 'PERFECT', 1, true); return; }
+    const hold = this.closestNote(lane, 'hold', t, JUDGE.bad);
+    if (hold && !hold.started) { hold.started = true; this.activeHolds.set(hold, true); this.applyJudgment(hold, this.judgeFor(Math.abs(t - hold.time)), 1, false); return; }
+    const tap = this.closestNote(lane, 'tap', t, JUDGE.bad);
+    if (tap) { this.applyJudgment(tap, this.judgeFor(Math.abs(t - tap.time)), 1, true); this.autoSyncSample(t - tap.time, t); return; }
+  }
+  releaseLane(lane) {
+    this.laneHeld[lane] = false;
+    document.querySelectorAll('.touch-lane')[lane]?.classList.remove('active');
+    const t = this.songTime();
+    for (const h of this.activeHolds.keys()) {
+      if (h.lane === lane && t < h.end_time - 0.08 && !h.broken && !h.hit) { h.broken = true; this.breakCombo('RELEASE'); }
     }
-    return 100 * this.scoreValue / this.scoreUnits;
   }
-  nearestTap(lane, t){
-    let best=null, bestAbs=999;
+  closestNote(lane, type, t, window) {
+    let best = null, bestD = Infinity;
     for (const n of this.chart.notes) {
-      if (n.judged || n.type !== "tap" || n.lane !== lane) continue;
-      const d=n.time-t, a=Math.abs(d);
-      if (a < bestAbs && a <= JUDGE.earlyBad) { best=n; bestAbs=a; }
+      if (n.type !== type || n.lane !== lane || n.hit || n.missed) continue;
+      const d = Math.abs(t - n.time);
+      if (d <= window && d < bestD) { best = n; bestD = d; }
     }
     return best;
   }
-  activeRoll(t){ return this.chart.notes.find(n => n.type === "roll" && !n.judged && t >= n.time-JUDGE.bad && t <= n.end_time+JUDGE.bad); }
-  pressLane(lane){
-    if (this.paused || !this.running) return;
-    this.held[lane]=true; const t=this.songTime();
-    const roll = this.activeRoll(t);
-    if (roll) {
-      roll.remaining = Math.max(0, (roll.remaining || roll.required_hits || 15) - 1);
-      this.hitBursts.push({lane, t:performance.now(), roll:true});
-      if (roll.remaining <= 0) { roll.judged=true; this.addScore("PERFECT"); }
-      return;
-    }
-    const hold = this.chart.notes.find(n => n.type === "hold" && !n.headJudged && n.lane === lane && Math.abs(n.time-t) <= JUDGE.earlyBad);
-    if (hold) {
-      const judge = this.judgeFromDelta(hold.time-t);
-      hold.headJudged=true; hold.active = judge !== "BAD" && judge !== "MISS";
-      this.holdByLane[lane]=hold.active ? hold : null;
-      this.addScore(judge); this.collectAuto(hold.time-t, judge, t); this.hitBursts.push({lane,t:performance.now()}); return;
-    }
-    const tap = this.nearestTap(lane,t);
-    if (tap) {
-      const delta=tap.time-t; const judge=this.judgeFromDelta(delta);
-      tap.judged=true; this.addScore(judge); this.collectAuto(delta, judge, t); this.hitBursts.push({lane,t:performance.now()}); return;
-    }
-    // EMPTY exists as a penalty-free internal state; no text is shown.
+  judgeFor(d) { if (d <= JUDGE.perfect) return 'PERFECT'; if (d <= JUDGE.great) return 'GREAT'; if (d <= JUDGE.good) return 'GOOD'; return 'BAD'; }
+  applyJudgment(note, judgment, units = 1, finish = true) {
+    this.counts[judgment] = (this.counts[judgment] || 0) + 1;
+    this.hitUnits += SCORE_WEIGHT[judgment] * units;
+    this.combo = judgment === 'BAD' || judgment === 'MISS' || judgment === 'RELEASE' ? 0 : this.combo + units;
+    this.maxCombo = Math.max(this.maxCombo, this.combo);
+    this.score = Math.round(1000000 * this.hitUnits / this.scoreUnits);
+    this.flash(judgment);
+    if (finish) note.hit = true;
   }
-  releaseLane(lane){
-    this.held[lane]=false;
-    const hold=this.holdByLane[lane];
-    if (hold && !hold.judged && this.songTime() < hold.end_time - JUDGE.good) { hold.broken=true; this.combo=0; this.lastJudge="RELEASE"; this.lastJudgeAt=performance.now(); }
-    this.holdByLane[lane]=null;
+  breakCombo(j='MISS') { this.counts[j] = (this.counts[j] || 0) + 1; this.combo = 0; this.flash(j); }
+  flash(text) { if (text !== 'EMPTY') { this.judgeText = text; this.judgeUntil = performance.now() + 450; } }
+  autoSyncSample(diff, t) {
+    if (!state.settings.autoSyncEnabled || t < 8 || Math.abs(diff) > JUDGE.good) return;
+    this.autoSamples.push(diff); if (this.autoSamples.length > 12) this.autoSamples.shift();
+    if (this.autoSamples.length < 8 || this.autoCount >= 3 || t - this.lastAutoAt < 18) return;
+    const avg = this.autoSamples.reduce((a,b)=>a+b,0) / this.autoSamples.length;
+    if (Math.abs(avg) < 0.022) return;
+    const change = Math.max(-12, Math.min(12, Math.round(avg * 1000 * 0.45)));
+    this.autoAdjust = Math.max(-45, Math.min(45, this.autoAdjust + change));
+    this.autoCount++; this.lastAutoAt = t; this.autoSamples = [];
+    this.flash(`AutoSync ${change > 0 ? '+' : ''}${change}ms`);
   }
-  judgeFromDelta(delta){
-    const a=Math.abs(delta);
-    if (a<=JUDGE.perfect) return "PERFECT"; if(a<=JUDGE.great) return "GREAT"; if(a<=JUDGE.good) return "GOOD"; if(a<=JUDGE.bad) return "BAD"; return "BAD";
-  }
-  updateMisses(t){
-    for(const n of this.chart.notes){
-      if(n.judged) continue;
-      if(n.type==="tap" && t > n.time + JUDGE.miss){ n.judged=true; this.addScore("MISS"); }
-      if(n.type==="roll" && t > n.end_time + JUDGE.miss){ n.judged=true; this.addScore(n.remaining<=0?"PERFECT":"MISS"); }
-      if(n.type==="hold" && t > n.end_time + JUDGE.miss){ n.judged=true; this.addScore((n.active && !n.broken)?"PERFECT":"MISS"); }
-    }
-  }
-  updateHoldTicks(t){
-    for(const n of this.chart.notes){
-      if(n.type!=="hold" || n.judged || !n.active || n.broken) continue;
-      if(!this.held[n.lane] && t < n.end_time - JUDGE.good){ n.broken=true; this.combo=0; continue; }
-      for(const tick of n.ticks || []){
-        if(!tick.judged && t >= tick.time){ tick.judged=true; if(this.held[n.lane]) this.addScore("PERFECT"); else { n.broken=true; this.addScore("MISS"); } }
+  update() {
+    const t = this.songTime();
+    const beat = 60 / (state.settings.manualBpm || this.chart.tempo_bpm || 120);
+    for (const n of this.chart.notes) {
+      if (n.hit || n.missed) continue;
+      if (n.type === 'tap' && t - n.time > JUDGE.miss) { n.missed = true; this.applyJudgment(n, 'MISS', 1, true); }
+      if (n.type === 'roll' && t > n.end_time + JUDGE.miss) { n.missed = true; this.applyJudgment(n, 'MISS', 1, true); }
+      if (n.type === 'hold') {
+        if (!n.started && t - n.time > JUDGE.miss) { n.missed = true; this.applyJudgment(n, 'MISS', 1, true); }
+        if (n.started && !n.hit && !n.broken) {
+          const tickInterval = Math.max(0.15, beat / 2);
+          const nextTick = n.time + (n.tickIndex + 1) * tickInterval;
+          if (t >= nextTick && nextTick < n.end_time - 0.05) { n.tickIndex++; this.applyJudgment(n, 'PERFECT', 1, false); }
+          if (t >= n.end_time - JUDGE.good && this.laneHeld[n.lane]) { this.applyJudgment(n, 'PERFECT', 1, true); this.activeHolds.delete(n); }
+        }
+        if ((n.broken || n.started) && !n.hit && t > n.end_time + JUDGE.miss) { n.missed = true; this.applyJudgment(n, 'MISS', 1, true); this.activeHolds.delete(n); }
       }
     }
+    if (!this.finished && this.audio.ended) this.finished = true;
   }
-  collectAuto(delta, judge, t){
-    if(!this.settings.autoSync || t < 8 || !["PERFECT","GREAT","GOOD"].includes(judge)) return;
-    this.autoSamples.push(delta*1000); if(this.autoSamples.length>24) this.autoSamples.shift();
-    if(this.autoSamples.length<14 || t-this.lastAutoAt<18 || this.autoAdjustments>=3) return;
-    const avg=this.autoSamples.reduce((a,b)=>a+b,0)/this.autoSamples.length;
-    const consistent=this.autoSamples.filter(x=>Math.sign(x)===Math.sign(avg) && Math.abs(x)>12).length;
-    if(Math.abs(avg)>18 && consistent>=10){
-      const adj=Math.max(-12,Math.min(12,avg*0.35));
-      this.runtimeOffset=Math.max(-45,Math.min(45,this.runtimeOffset+adj));
-      this.autoAdjustments++; this.lastAutoAt=t; this.autosyncText=`AutoSync ${adj>0?"+":""}${Math.round(adj)}ms`; this.autosyncAt=performance.now(); this.autoSamples=[];
+  loop() { this.update(); this.draw(); this._raf = requestAnimationFrame(() => this.loop()); }
+  draw() {
+    const ctx = this.ctx, w = this.canvas.width, h = this.canvas.height;
+    ctx.clearRect(0,0,w,h);
+    const laneCount = this.chart.lane_count;
+    const playX = w * 0.18, playW = w * 0.64, laneW = playW / laneCount;
+    const judgeY = h * 0.82, topY = h * 0.14;
+    const t = this.songTime();
+    const speedMul = state.settings.speedMultiplier || 1;
+    const grad = ctx.createLinearGradient(0,0,0,h); grad.addColorStop(0,'#0a0f25'); grad.addColorStop(1,'#050712'); ctx.fillStyle = grad; ctx.fillRect(0,0,w,h);
+    ctx.fillStyle = 'rgba(255,255,255,.035)'; ctx.fillRect(playX, topY, playW, judgeY - topY + 42);
+    for (let i=0;i<=laneCount;i++) { const x=playX+i*laneW; ctx.strokeStyle='rgba(210,225,255,.13)'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(x, topY); ctx.lineTo(x, judgeY+42); ctx.stroke(); }
+    const beat = 60 / (state.settings.manualBpm || this.chart.tempo_bpm || 120);
+    for (let gt = Math.floor((t-2)/beat)*beat; gt < t+3; gt += beat/2) {
+      const y = judgeY - (gt - t) * 800 * speedMul;
+      if (y < topY || y > judgeY+42) continue;
+      ctx.strokeStyle = Math.abs((gt/beat)%1) < 0.01 ? 'rgba(220,230,255,.22)' : 'rgba(220,230,255,.09)'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(playX,y); ctx.lineTo(playX+playW,y); ctx.stroke();
     }
+    ctx.strokeStyle = '#f1f5ff'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(playX, judgeY); ctx.lineTo(playX+playW, judgeY); ctx.stroke();
+    for (const n of this.chart.notes) this.drawNote(ctx, n, t, playX, laneW, judgeY, topY, speedMul);
+    ctx.fillStyle = '#eef3ff'; ctx.font = '800 34px Malgun Gothic, Noto Sans CJK KR, sans-serif'; ctx.fillText(String(this.score).padStart(7,'0'), 34, 54);
+    ctx.font = '900 46px Malgun Gothic, sans-serif'; ctx.textAlign='center'; ctx.fillText(`${this.combo} COMBO`, w/2, 62); ctx.textAlign='left';
+    const acc = this.acc(); ctx.font = '700 24px Malgun Gothic, sans-serif'; ctx.fillStyle='#b9c7e8'; ctx.fillText(`ACC ${acc.toFixed(2)}%`, 34, 88);
+    ctx.fillText(this.chart.title || 'Untitled', 34, h-34);
+    if (performance.now() < this.judgeUntil) { ctx.font='900 48px Malgun Gothic, sans-serif'; ctx.textAlign='center'; ctx.fillStyle='#9bffd0'; ctx.fillText(this.judgeText, w/2, h*0.34); ctx.textAlign='left'; }
+    if (this.paused || this.finished) { ctx.fillStyle='rgba(0,0,0,.62)'; ctx.fillRect(0,0,w,h); ctx.fillStyle='#fff'; ctx.font='900 64px Malgun Gothic, sans-serif'; ctx.textAlign='center'; ctx.fillText(this.finished ? 'RESULT' : 'PAUSED', w/2, h*.38); ctx.font='700 28px Malgun Gothic, sans-serif'; ctx.fillText(`SCORE ${this.score} · MAX COMBO ${this.maxCombo} · ACC ${acc.toFixed(2)}%`, w/2, h*.48); ctx.fillText('Back: 목록 · Retry: 재시작 · Pause: 계속', w/2, h*.56); ctx.textAlign='left'; }
   }
-  noteY(note,t){ const speed=(note.scroll_speed || 760)*Number(this.settings.speedMultiplier || 1); return this.judgeY - (note.time - t)*speed; }
-  endY(note,t){ const speed=(note.scroll_speed || 760)*Number(this.settings.speedMultiplier || 1); return this.judgeY - (note.end_time - t)*speed; }
-  draw(){
-    const c=this.ctx, t=this.songTime(); c.clearRect(0,0,this.w,this.h);
-    const g=c.createLinearGradient(0,0,0,this.h); g.addColorStop(0,"#091021"); g.addColorStop(1,"#050713"); c.fillStyle=g; c.fillRect(0,0,this.w,this.h);
-    this.drawHud(c,t); this.drawLanes(c); this.drawGrid(c,t); this.drawNotes(c,t); this.drawHitBursts(c); if(this.paused) this.drawPause(c);
-  }
-  drawHud(c,t){
-    c.fillStyle="#eaf1ff"; c.font="900 34px Malgun Gothic, sans-serif"; c.textAlign="center"; c.fillText(`${this.combo} COMBO`,this.w/2,48);
-    c.font="800 18px Malgun Gothic, sans-serif"; c.fillStyle="#aebbe0"; c.textAlign="left"; c.fillText(`SCORE ${this.score().toLocaleString()}`,24,34); c.fillText(`ACC ${this.acc().toFixed(2)}%`,24,60);
-    c.textAlign="right"; c.fillText(`${this.chart.title || "Untitled"}`,this.w-24,34);
-    const age=performance.now()-this.lastJudgeAt; if(age<650 && this.lastJudge && this.lastJudge!=="EMPTY"){ c.textAlign="center"; c.font="900 42px Malgun Gothic, sans-serif"; c.fillStyle=this.lastJudge==="PERFECT"?"#ffe69a":this.lastJudge==="GREAT"?"#a8e8ff":"#ff9090"; c.fillText(this.lastJudge,this.w/2,98); }
-    if(performance.now()-this.autosyncAt<1400){ c.font="800 16px Malgun Gothic, sans-serif"; c.fillStyle="#7ee7b8"; c.textAlign="center"; c.fillText(this.autosyncText,this.w/2,122); }
-  }
-  drawLanes(c){
-    c.strokeStyle="#26365c"; c.lineWidth=2; c.fillStyle="rgba(13,20,37,.72)"; c.fillRect(this.playLeft,this.playTop,this.playRight-this.playLeft,this.judgeY-this.playTop+52);
-    for(let i=0;i<=this.laneCount;i++){ const x=this.playLeft+i*this.laneW; c.beginPath(); c.moveTo(x,this.playTop); c.lineTo(x,this.judgeY+52); c.stroke(); }
-    c.strokeStyle="#dce7ff"; c.lineWidth=5; c.beginPath(); c.moveTo(this.playLeft,this.judgeY); c.lineTo(this.playRight,this.judgeY); c.stroke();
-    c.font="900 24px Malgun Gothic, sans-serif"; c.textAlign="center";
-    for(let i=0;i<this.laneCount;i++){ const x=this.playLeft+(i+.5)*this.laneW; c.fillStyle=this.held[i]?"#dceaff":"#aebbe0"; c.fillText(this.keys[i] || "",x,this.judgeY+48); }
-  }
-  drawGrid(c,t){
-    const bpm=Number(this.settings.manualBpm || this.chart.tempo_bpm || 120); const beat=60/bpm/2; if(!Number.isFinite(beat)||beat<=0) return;
-    const start=Math.max(0,t-1.2), end=t+3.2; c.lineWidth=1;
-    for(let gt=Math.floor(start/beat)*beat; gt<end; gt+=beat){ const y=this.judgeY-(gt-t)*760*Number(this.settings.speedMultiplier || 1); if(y<this.playTop||y>this.judgeY+52) continue; c.strokeStyle=Math.abs((gt/(beat*2))-Math.round(gt/(beat*2)))<.05?"rgba(180,190,215,.32)":"rgba(180,190,215,.14)"; c.beginPath(); c.moveTo(this.playLeft,y); c.lineTo(this.playRight,y); c.stroke(); }
-  }
-  drawNotes(c,t){
-    for(const n of this.chart.notes){
-      if(n.judged && n.type!=="hold") continue;
-      if(n.type==="hold") this.drawHold(c,n,t); else if(n.type==="roll") this.drawRoll(c,n,t); else this.drawTap(c,n,t);
+  drawNote(ctx, n, t, playX, laneW, judgeY, topY, speedMul) {
+    if (n.hit || n.missed) return;
+    const sp = (n.scroll_speed || 800) * speedMul;
+    if (n.type === 'roll') {
+      const y1 = judgeY - (n.time - t) * sp, y2 = judgeY - (n.end_time - t) * sp;
+      if (Math.max(y1,y2) < topY || Math.min(y1,y2) > judgeY+70) return;
+      ctx.fillStyle='rgba(255,194,102,.18)'; ctx.strokeStyle='#ffc266'; ctx.lineWidth=3; roundRect(ctx, playX, Math.min(y1,y2), laneW*this.chart.lane_count, Math.abs(y2-y1)+28, 16, true, true);
+      ctx.fillStyle='#fff0bf'; ctx.font='900 34px Malgun Gothic, sans-serif'; ctx.textAlign='center'; ctx.fillText(`ROLL ${Math.max(0,n.required_hits-n.rollHits)}`, playX+laneW*this.chart.lane_count/2, Math.min(y1,y2)+48); ctx.textAlign='left'; return;
     }
+    const x = playX + n.lane * laneW + laneW * .15;
+    const width = laneW * .7;
+    if (n.type === 'hold') {
+      const yHead = judgeY - (n.time - t) * sp, yTail = judgeY - (n.end_time - t) * sp;
+      if (Math.max(yHead,yTail) < topY || Math.min(yHead,yTail) > judgeY+70) return;
+      ctx.fillStyle = n.broken ? 'rgba(255,100,130,.25)' : 'rgba(124,199,255,.28)'; roundRect(ctx, x+width*.22, Math.min(yHead,yTail), width*.56, Math.abs(yTail-yHead)+18, 12, true, false);
+      ctx.fillStyle = n.broken ? '#ff7f9f' : '#7cc7ff'; roundRect(ctx, x, yHead-15, width, 30, 10, true, false); roundRect(ctx, x, yTail-15, width, 30, 10, true, false); return;
+    }
+    const y = judgeY - (n.time - t) * sp;
+    if (y < topY || y > judgeY+70) return;
+    const colors = { normal:'#7cc7ff', bright:'#9bffd0', accent:'#ffe08a', highlight:'#d6a3ff' };
+    ctx.fillStyle = colors[n.color] || colors.normal; ctx.strokeStyle='rgba(255,255,255,.7)'; ctx.lineWidth=2; roundRect(ctx, x, y-14, width, 28, 10, true, true);
   }
-  noteRect(lane,y){ const w=this.laneW*.72,h=26,x=this.playLeft+lane*this.laneW+(this.laneW-w)/2; return {x,y:y-h/2,w,h}; }
-  noteColor(n){ return n.color==="highlight"?"#ff8fd6":n.color==="accent"?"#f5bf5e":n.color==="bright"?"#8fc6ff":"#78a7ff"; }
-  rounded(c,x,y,w,h,r){ c.beginPath(); c.roundRect(x,y,w,h,r); c.fill(); c.stroke(); }
-  drawTap(c,n,t){ const y=this.noteY(n,t); if(y<this.playTop-40||y>this.judgeY+80) return; const r=this.noteRect(n.lane,y); c.fillStyle=this.noteColor(n); c.strokeStyle="#f3f7ff"; c.lineWidth=2; this.rounded(c,r.x,r.y,r.w,r.h,10); }
-  drawHold(c,n,t){
-    const headY=this.noteY(n,t), tailY=this.endY(n,t); if(Math.max(headY,tailY)<this.playTop-80||Math.min(headY,tailY)>this.judgeY+120) return;
-    const x=this.playLeft+n.lane*this.laneW+this.laneW*.31, w=this.laneW*.38; c.fillStyle=n.broken?"rgba(255,107,107,.32)":"rgba(126,231,184,.42)"; c.strokeStyle=n.broken?"#ff7777":"#9ef3c9"; c.lineWidth=2; const y1=Math.min(headY,tailY), h=Math.abs(tailY-headY); c.fillRect(x,y1,w,Math.max(8,h)); c.strokeRect(x,y1,w,Math.max(8,h));
-    const rr=this.noteRect(n.lane,headY); c.fillStyle="#7ee7b8"; c.strokeStyle="#f4fff9"; this.rounded(c,rr.x,rr.y,rr.w,rr.h,10); const tr=this.noteRect(n.lane,tailY); c.fillStyle="#56dba0"; c.strokeStyle="#f4fff9"; this.rounded(c,tr.x,tr.y,tr.w,tr.h,10);
-  }
-  drawRoll(c,n,t){ const y=this.noteY(n,t), y2=this.endY(n,t); if(Math.max(y,y2)<this.playTop-80||Math.min(y,y2)>this.judgeY+120) return; const x=this.playLeft+18,w=this.playRight-this.playLeft-36; c.fillStyle="rgba(245,191,94,.22)"; c.strokeStyle="#f5bf5e"; c.lineWidth=3; c.fillRect(x,Math.min(y,y2),w,Math.max(20,Math.abs(y2-y))); c.strokeRect(x,Math.min(y,y2),w,Math.max(20,Math.abs(y2-y))); c.fillStyle="#fff1c6"; c.font="900 28px Malgun Gothic, sans-serif"; c.textAlign="center"; c.fillText(`ROLL ${n.remaining ?? n.required_hits}`,this.w/2,(y+y2)/2); }
-  drawHitBursts(c){ const now=performance.now(); this.hitBursts=this.hitBursts.filter(b=>now-b.t<260); for(const b of this.hitBursts){ const age=(now-b.t)/260, x=this.playLeft+(b.lane+.5)*this.laneW, r=24+age*44; c.strokeStyle=`rgba(210,235,255,${1-age})`; c.lineWidth=3; c.beginPath(); c.arc(x,this.judgeY,r,0,Math.PI*2); c.stroke(); } }
-  drawPause(c){ c.fillStyle="rgba(0,0,0,.48)"; c.fillRect(0,0,this.w,this.h); c.fillStyle="#fff"; c.font="900 54px Malgun Gothic, sans-serif"; c.textAlign="center"; c.fillText("PAUSED",this.w/2,this.h/2); }
-  drawResult(){
-    this.draw(); const c=this.ctx; c.fillStyle="rgba(0,0,0,.62)"; c.fillRect(0,0,this.w,this.h); c.fillStyle="#101a30"; c.strokeStyle="#78a7ff"; c.lineWidth=2; const x=this.w/2-210,y=this.h/2-160,w=420,h=300; c.fillRect(x,y,w,h); c.strokeRect(x,y,w,h); c.fillStyle="#fff"; c.font="900 34px Malgun Gothic, sans-serif"; c.textAlign="center"; c.fillText("RESULT",this.w/2,y+54); c.font="800 22px Malgun Gothic, sans-serif"; c.fillText(`Score ${this.score().toLocaleString()}`,this.w/2,y+105); c.fillText(`Max Combo ${this.maxCombo}`,this.w/2,y+142); c.fillText(`ACC ${this.acc().toFixed(2)}%`,this.w/2,y+179); c.font="700 15px Malgun Gothic, sans-serif"; c.fillStyle="#aebbe0"; c.fillText(`${JSON.stringify(this.judgeCounts)}`,this.w/2,y+220); c.fillText("Back 버튼으로 돌아가기",this.w/2,y+255);
+  acc() {
+    const totalPossible = state.settings.accMode === 'start100' ? Math.max(1, Object.values(this.counts).reduce((a,b)=>a+b,0)) : this.scoreUnits;
+    if (state.settings.accMode === 'start100' && totalPossible === 0) return 100;
+    return Math.max(0, Math.min(100, 100 * this.hitUnits / totalPossible));
   }
 }
+function roundRect(ctx, x, y, w, h, r, fill, stroke) { ctx.beginPath(); ctx.roundRect(x,y,w,h,r); if(fill)ctx.fill(); if(stroke)ctx.stroke(); }
+function buildTouchLanes(n) { const root=$('touchLanes'); root.innerHTML=''; for(let i=0;i<n;i++){ const d=document.createElement('div'); d.className='touch-lane'; root.appendChild(d); } }
+function startGame(chart, audioUrl) { if (state.game) state.game.stop(); state.game = new RhythmGame(chart, audioUrl); state.game.start().catch(err => alert(`재생 실패: ${err.message || err}`)); }
+function returnToLauncher() { if (state.game) { state.game.stop(); state.game=null; } $('gameView').classList.add('hidden'); $('launcher').classList.remove('hidden'); }
 
-function buildTouchLanes(count,onDown,onUp){
-  const box=$("touchLanes"); box.innerHTML="";
-  for(let i=0;i<count;i++){
-    const d=document.createElement("div"); d.className="touch-lane";
-    const down=(e)=>{ e.preventDefault(); d.classList.add("pressed"); onDown(i); };
-    const up=(e)=>{ e.preventDefault(); d.classList.remove("pressed"); onUp(i); };
-    d.addEventListener("pointerdown",down); d.addEventListener("pointerup",up); d.addEventListener("pointercancel",up); d.addEventListener("pointerleave",up);
-    box.appendChild(d);
-  }
-}
-function startGame(){
-  saveSettings();
-  if(!state.chart || !state.audioBuffer) return;
-  $("mainLayout").classList.add("hidden"); $("gameShell").classList.remove("hidden");
-  state.game = new RhythmGame($("gameCanvas"), state.chart, state.audioBuffer, state.settings);
-}
-function stopGame(){
-  state.game?.destroy(); state.game=null; $("gameShell").classList.add("hidden"); $("mainLayout").classList.remove("hidden");
-}
-
-function wire(){
-  applySettingsToUI(); loadManifest();
-  $("saveSettingsBtn").onclick=saveSettings;
-  $("startBtn").onclick=startGame;
-  $("backBtn").onclick=stopGame;
-  $("pauseBtn").onclick=()=>state.game?.togglePause();
-  $("retryBtn").onclick=()=>state.game?.retry();
-  $("reloadManifestBtn").onclick=loadManifest;
-  $("chartFile").onchange=async(e)=>{ try{ const f=e.target.files[0]; if(!f) return; state.chart=normalizeChart(await readJsonFile(f)); updateSongInfo(); setStatus("채보 로드됨"); }catch(err){ alert(err.message); } };
-  $("audioFile").onchange=async(e)=>{ try{ const f=e.target.files[0]; if(!f) return; await loadAudioFromFile(f); updateSongInfo(); setStatus("음악 로드됨"); }catch(err){ alert(err.message); } };
-  $("loadUrlBtn").onclick=async()=>{ try{ await loadUrl($("chartUrl").value.trim(), $("audioUrl").value.trim()); }catch(e){ alert(e.message); setStatus("로드 실패"); } };
-  const params=new URLSearchParams(location.search); if(params.get("chart") && params.get("audio")){ $("chartUrl").value=params.get("chart"); $("audioUrl").value=params.get("audio"); loadUrl(params.get("chart"),params.get("audio")).catch(e=>setStatus(e.message)); }
-}
-wire();
+$('refreshLibraryBtn').onclick = loadManifest;
+$('playSelectedBtn').onclick = playSelected;
+$('playLocalBtn').onclick = playLocal;
+$('localChartInput').onchange = e => { state.localChart = e.target.files[0]; $('localStatus').textContent = state.localChart?.name || ''; };
+$('localAudioInput').onchange = e => { state.localAudio = e.target.files[0]; $('localStatus').textContent = [state.localChart?.name, state.localAudio?.name].filter(Boolean).join(' + '); };
+$('openSettingsBtn').onclick = () => { settingsToUI(); $('settingsDialog').showModal(); };
+$('saveSettingsBtn').onclick = uiToSettings;
+$('resetSettingsBtn').onclick = () => { state.settings = { ...DEFAULT_SETTINGS }; saveSettings(); settingsToUI(); };
+$('backToLauncherBtn').onclick = returnToLauncher;
+settingsToUI();
+loadManifest();
