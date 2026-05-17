@@ -11,23 +11,28 @@
     <header class="topbar">
       <div>
         <div class="brand">Rhythm4G <span>Online</span></div>
-        <div class="subtitle">Developer: 집돌이 페렐만 · Static GitHub Pages Build</div>
+        <div class="subtitle">Developer: 집돌이 페렐만</div>
       </div>
-      <button id="openSettingsBtn" class="ghost-btn">설정</button>
+      <nav class="top-actions">
+        <a class="link-btn" href="https://drive.google.com/file/d/16K75hilq63fbOOWtmtmwqpYPxXOkQl-s/view?usp=drive_link" target="_blank" rel="noopener noreferrer">채보 제작 프로그램</a>
+        <a class="link-btn" href="https://www.coshaman.com" target="_blank" rel="noopener noreferrer">개발자 포트폴리오</a>
+        <button id="openSettingsBtn" class="ghost-btn">설정</button>
+      </nav>
     </header>
 
     <main id="launcher" class="launcher">
       <section class="hero-card">
         <div>
-          <h1>GitHub에 올라간 곡/채보를 자동으로 불러옵니다.</h1>
-          <p>
-            <code>music/</code>, <code>charts/</code>에 파일을 push하면 GitHub Actions가
-            <code>manifest.json</code>을 만들고, 이 화면의 곡 목록이 자동 갱신됩니다.
-          </p>
+          <h1>Rhythm4G Online</h1>
+          <p>온라인 라이브러리에서 곡을 고르거나, 로컬의 채보와 음악 파일을 직접 선택해 플레이합니다.</p>
+          <div class="hero-links">
+            <a href="https://drive.google.com/file/d/16K75hilq63fbOOWtmtmwqpYPxXOkQl-s/view?usp=drive_link" target="_blank" rel="noopener noreferrer">채보 제작 프로그램 다운로드</a>
+            <a href="https://www.coshaman.com" target="_blank" rel="noopener noreferrer">집돌이 페렐만 포트폴리오</a>
+          </div>
         </div>
         <div class="status-box">
-          <div class="status-label">라이브러리 상태</div>
-          <div id="libraryStatus" class="status-value">manifest 로딩 중...</div>
+          <div class="status-label">라이브러리</div>
+          <div id="libraryStatus" class="status-value">불러오는 중...</div>
         </div>
       </section>
 
@@ -36,7 +41,7 @@
           <div class="panel-head">
             <div>
               <h2>온라인 라이브러리</h2>
-              <p>GitHub repo의 <code>music/</code>, <code>charts/</code> 기반 목록</p>
+              <p>등록된 곡과 채보를 선택해 바로 플레이합니다.</p>
             </div>
             <button id="refreshLibraryBtn" class="small-btn">새로고침</button>
           </div>
@@ -45,7 +50,7 @@
 
         <aside class="panel side-panel">
           <h2>로컬 파일로 플레이</h2>
-          <p>GitHub에 올리지 않은 개인 파일은 브라우저에서 직접 선택해서 플레이합니다.</p>
+          <p>채보 JSON과 음악 파일을 선택합니다. 파일은 서버로 업로드되지 않습니다.</p>
           <label class="file-row">
             <span>채보 JSON</span>
             <input id="localChartInput" type="file" accept=".json,application/json" />
@@ -70,6 +75,7 @@
       <canvas id="gameCanvas" width="1280" height="720"></canvas>
       <div class="game-actions">
         <button id="backToLauncherBtn" class="ghost-btn">목록으로</button>
+        <button id="fullscreenBtn" class="ghost-btn">전체화면</button>
       </div>
       <div id="touchLanes" class="touch-lanes"></div>
     </section>

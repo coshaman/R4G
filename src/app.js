@@ -83,7 +83,7 @@ function uiToSettings() {
 }
 
 async function loadManifest() {
-  setStatus('manifest 로딩 중...');
+  setStatus('불러오는 중...');
   try {
     const res = await fetch(`manifest.json?ts=${Date.now()}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -95,8 +95,8 @@ async function loadManifest() {
   } catch (err) {
     state.songs = [];
     renderSongs();
-    setStatus('manifest 없음');
-    $('songList').innerHTML = `<div class="song-card"><div class="song-title">온라인 곡 목록이 없습니다.</div><div class="song-meta">GitHub Actions가 manifest.json을 만들도록 설정하거나, scripts/generate_manifest.py를 실행해 주세요.<br>${String(err.message || err)}</div></div>`;
+    setStatus('곡 목록 없음');
+    $('songList').innerHTML = `<div class="song-card"><div class="song-title">등록된 곡이 없습니다.</div><div class="song-meta">music/와 charts/에 파일을 추가한 뒤 다시 배포해 주세요.</div></div>`;
   }
 }
 function normalizeManifest(manifest) {
@@ -431,6 +431,26 @@ function buildTouchLanes(n) { const root=$('touchLanes'); root.innerHTML=''; for
 function startGame(chart, audioUrl) { if (state.game) state.game.stop(); state.game = new RhythmGame(chart, audioUrl); state.game.start().catch(err => alert(`재생 실패: ${err.message || err}`)); }
 function returnToLauncher() { if (state.game) { state.game.stop(); state.game=null; } $('gameView').classList.add('hidden'); $('launcher').classList.remove('hidden'); }
 
+
+async function toggleFullscreen() {
+  const target = $('gameView');
+  try {
+    if (!document.fullscreenElement) {
+      await target.requestFullscreen?.();
+      if (screen.orientation?.lock) {
+        screen.orientation.lock('landscape').catch(() => {});
+      }
+      $('fullscreenBtn').textContent = '전체화면 해제';
+    } else {
+      await document.exitFullscreen?.();
+      $('fullscreenBtn').textContent = '전체화면';
+    }
+    setTimeout(() => state.game?.updateTouchLaneGeometry?.(), 150);
+  } catch (err) {
+    console.warn('fullscreen failed', err);
+  }
+}
+
 $('refreshLibraryBtn').onclick = loadManifest;
 $('playSelectedBtn').onclick = playSelected;
 $('playLocalBtn').onclick = playLocal;
@@ -440,5 +460,7 @@ $('openSettingsBtn').onclick = () => { settingsToUI(); $('settingsDialog').showM
 $('saveSettingsBtn').onclick = uiToSettings;
 $('resetSettingsBtn').onclick = () => { state.settings = { ...DEFAULT_SETTINGS }; saveSettings(); settingsToUI(); };
 $('backToLauncherBtn').onclick = returnToLauncher;
+$('fullscreenBtn').onclick = toggleFullscreen;
+document.addEventListener('fullscreenchange', () => { $('fullscreenBtn').textContent = document.fullscreenElement ? '전체화면 해제' : '전체화면'; setTimeout(() => state.game?.updateTouchLaneGeometry?.(), 150); });
 settingsToUI();
 loadManifest();
