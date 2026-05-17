@@ -64,6 +64,35 @@
 
           <hr />
 
+          <h2>자작 채보 제작</h2>
+          <p>음악을 재생하면서 키보드/터치 입력을 그대로 채보로 기록합니다. 3초 이상 누르면 롱노트로 저장됩니다.</p>
+          <label class="file-row">
+            <span>음악 파일</span>
+            <input id="createAudioInput" type="file" accept="audio/*,.mp3,.wav,.ogg,.flac,.m4a" />
+          </label>
+          <label class="file-row">
+            <span>곡 제목</span>
+            <input id="createTitleInput" type="text" placeholder="비워두면 파일명 사용" />
+          </label>
+          <label class="file-row">
+            <span>난이도</span>
+            <select id="createDifficultyInput">
+              <option value="easy">easy</option>
+              <option value="normal" selected>normal</option>
+              <option value="hard">hard</option>
+              <option value="extreme">extreme</option>
+              <option value="master">master</option>
+            </select>
+          </label>
+          <label class="file-row">
+            <span>BPM</span>
+            <input id="createBpmInput" type="number" step="0.01" min="40" max="260" placeholder="120" />
+          </label>
+          <button id="startCreatorBtn" class="primary-btn full">채보 제작 시작</button>
+          <div id="createStatus" class="hint"></div>
+
+          <hr />
+
           <h2>선택한 곡</h2>
           <div id="selectedInfo" class="selected-info">아직 선택된 곡이 없습니다.</div>
           <button id="playSelectedBtn" class="primary-btn full" disabled>선택한 채보 플레이</button>

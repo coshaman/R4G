@@ -22,6 +22,8 @@ const state = {
   selected: null,
   localChart: null,
   localAudio: null,
+  createAudio: null,
+  creator: null,
   settings: loadSettings(),
   game: null,
 };
@@ -204,6 +206,8 @@ class RhythmGame {
     this.judgeText = ''; this.judgeUntil = 0;
     this.autoSamples = []; this.autoAdjust = 0; this.autoCount = 0; this.lastAutoAt = 0;
     this.finished = false;
+    this.rollShakeUntil = 0;
+    this.holdPulse = Array(this.chart.lane_count).fill(0);
     this._raf = null;
     this.boundKeyDown = e => this.onKeyDown(e);
     this.boundKeyUp = e => this.onKeyUp(e);
@@ -305,7 +309,7 @@ class RhythmGame {
     document.querySelectorAll('.touch-lane')[lane]?.classList.add('active');
     const t = this.songTime();
     const roll = this.chart.notes.find(n => n.type === 'roll' && !n.hit && !n.missed && t >= n.time && t <= n.end_time);
-    if (roll) { roll.rollHits += 1; this.flash(`ROLL ${Math.max(0, roll.required_hits - roll.rollHits)}`); if (roll.rollHits >= roll.required_hits) this.applyJudgment(roll, 'PERFECT', 1, true); return; }
+    if (roll) { roll.rollHits += 1; roll.pulseUntil = performance.now() + 180; this.rollShakeUntil = performance.now() + 90; this.flash(`ROLL ${Math.max(0, roll.required_hits - roll.rollHits)}`); if (roll.rollHits >= roll.required_hits) this.applyJudgment(roll, 'PERFECT', 1, true); return; }
     const hold = this.closestNote(lane, 'hold', t, JUDGE.bad);
     if (hold && !hold.started) { hold.started = true; this.activeHolds.set(hold, true); this.applyJudgment(hold, this.judgeFor(Math.abs(t - hold.time)), 1, false); return; }
     const tap = this.closestNote(lane, 'tap', t, JUDGE.bad);
@@ -363,7 +367,7 @@ class RhythmGame {
         if (n.started && !n.hit && !n.broken) {
           const tickInterval = Math.max(0.15, beat / 2);
           const nextTick = n.time + (n.tickIndex + 1) * tickInterval;
-          if (t >= nextTick && nextTick < n.end_time - 0.05) { n.tickIndex++; this.applyJudgment(n, 'PERFECT', 1, false); }
+          if (t >= nextTick && nextTick < n.end_time - 0.05) { n.tickIndex++; this.holdPulse[n.lane] = performance.now() + 140; this.applyJudgment(n, 'PERFECT', 1, false); }
           if (t >= n.end_time - JUDGE.good && this.laneHeld[n.lane]) { this.applyJudgment(n, 'PERFECT', 1, true); this.activeHolds.delete(n); }
         }
         if ((n.broken || n.started) && !n.hit && t > n.end_time + JUDGE.miss) { n.missed = true; this.applyJudgment(n, 'MISS', 1, true); this.activeHolds.delete(n); }
@@ -375,6 +379,9 @@ class RhythmGame {
   draw() {
     const ctx = this.ctx, w = this.canvas.width, h = this.canvas.height;
     ctx.clearRect(0,0,w,h);
+    const shake = performance.now() < this.rollShakeUntil ? (Math.random() - 0.5) * 5 : 0;
+    ctx.save();
+    ctx.translate(shake, 0);
     const laneCount = this.chart.lane_count;
     const playX = w * 0.18, playW = w * 0.64, laneW = playW / laneCount;
     const judgeY = h * 0.82, topY = h * 0.14;
@@ -396,6 +403,7 @@ class RhythmGame {
     const acc = this.acc(); ctx.font = '700 24px Malgun Gothic, sans-serif'; ctx.fillStyle='#b9c7e8'; ctx.fillText(`ACC ${acc.toFixed(2)}%`, 34, 88);
     ctx.fillText(this.chart.title || 'Untitled', 34, h-34);
     if (performance.now() < this.judgeUntil) { ctx.font='900 48px Malgun Gothic, sans-serif'; ctx.textAlign='center'; ctx.fillStyle='#9bffd0'; ctx.fillText(this.judgeText, w/2, h*0.34); ctx.textAlign='left'; }
+    ctx.restore();
     if (this.paused || this.finished) { ctx.fillStyle='rgba(0,0,0,.62)'; ctx.fillRect(0,0,w,h); ctx.fillStyle='#fff'; ctx.font='900 64px Malgun Gothic, sans-serif'; ctx.textAlign='center'; ctx.fillText(this.finished ? 'RESULT' : 'PAUSED', w/2, h*.38); ctx.font='700 28px Malgun Gothic, sans-serif'; ctx.fillText(`SCORE ${this.score} · MAX COMBO ${this.maxCombo} · ACC ${acc.toFixed(2)}%`, w/2, h*.48); ctx.fillText('Back: 목록 · Retry: 재시작 · Pause: 계속', w/2, h*.56); ctx.textAlign='left'; }
   }
   drawNote(ctx, n, t, playX, laneW, judgeY, topY, speedMul) {
@@ -404,7 +412,10 @@ class RhythmGame {
     if (n.type === 'roll') {
       const y1 = judgeY - (n.time - t) * sp, y2 = judgeY - (n.end_time - t) * sp;
       if (Math.max(y1,y2) < topY || Math.min(y1,y2) > judgeY+70) return;
-      ctx.fillStyle='rgba(255,194,102,.18)'; ctx.strokeStyle='#ffc266'; ctx.lineWidth=3; roundRect(ctx, playX, Math.min(y1,y2), laneW*this.chart.lane_count, Math.abs(y2-y1)+28, 16, true, true);
+      const pulse = performance.now() < (n.pulseUntil || 0) ? 1 : 0;
+      ctx.fillStyle = pulse ? 'rgba(255,218,120,.34)' : 'rgba(255,194,102,.18)';
+      ctx.strokeStyle = pulse ? '#ffffff' : '#ffc266'; ctx.lineWidth= pulse ? 5 : 3; roundRect(ctx, playX, Math.min(y1,y2), laneW*this.chart.lane_count, Math.abs(y2-y1)+28, 16, true, true);
+      if (pulse) { ctx.strokeStyle='rgba(255,255,255,.65)'; ctx.lineWidth=2; roundRect(ctx, playX-8, Math.min(y1,y2)-8, laneW*this.chart.lane_count+16, Math.abs(y2-y1)+44, 20, false, true); }
       ctx.fillStyle='#fff0bf'; ctx.font='900 34px Malgun Gothic, sans-serif'; ctx.textAlign='center'; ctx.fillText(`ROLL ${Math.max(0,n.required_hits-n.rollHits)}`, playX+laneW*this.chart.lane_count/2, Math.min(y1,y2)+48); ctx.textAlign='left'; return;
     }
     const x = playX + n.lane * laneW + laneW * .15;
@@ -412,7 +423,9 @@ class RhythmGame {
     if (n.type === 'hold') {
       const yHead = judgeY - (n.time - t) * sp, yTail = judgeY - (n.end_time - t) * sp;
       if (Math.max(yHead,yTail) < topY || Math.min(yHead,yTail) > judgeY+70) return;
-      ctx.fillStyle = n.broken ? 'rgba(255,100,130,.25)' : 'rgba(124,199,255,.28)'; roundRect(ctx, x+width*.22, Math.min(yHead,yTail), width*.56, Math.abs(yTail-yHead)+18, 12, true, false);
+      const heldPulse = n.started && !n.broken ? 0.5 + 0.5 * Math.sin(performance.now() / 70) : 0;
+      ctx.fillStyle = n.broken ? 'rgba(255,100,130,.25)' : `rgba(124,199,255,${0.26 + heldPulse * 0.18})`; roundRect(ctx, x+width*.22, Math.min(yHead,yTail), width*.56, Math.abs(yTail-yHead)+18, 12, true, false);
+      if (n.started && !n.broken) { ctx.strokeStyle=`rgba(190,235,255,${0.35 + heldPulse * 0.45})`; ctx.lineWidth=3; roundRect(ctx, x+width*.13, Math.min(yHead,yTail)-6, width*.74, Math.abs(yTail-yHead)+30, 16, false, true); }
       ctx.fillStyle = n.broken ? '#ff7f9f' : '#7cc7ff'; roundRect(ctx, x, yHead-15, width, 30, 10, true, false); roundRect(ctx, x, yTail-15, width, 30, 10, true, false); return;
     }
     const y = judgeY - (n.time - t) * sp;
@@ -429,7 +442,184 @@ class RhythmGame {
 function roundRect(ctx, x, y, w, h, r, fill, stroke) { ctx.beginPath(); ctx.roundRect(x,y,w,h,r); if(fill)ctx.fill(); if(stroke)ctx.stroke(); }
 function buildTouchLanes(n) { const root=$('touchLanes'); root.innerHTML=''; for(let i=0;i<n;i++){ const d=document.createElement('div'); d.className='touch-lane'; root.appendChild(d); } }
 function startGame(chart, audioUrl) { if (state.game) state.game.stop(); state.game = new RhythmGame(chart, audioUrl); state.game.start().catch(err => alert(`재생 실패: ${err.message || err}`)); }
-function returnToLauncher() { if (state.game) { state.game.stop(); state.game=null; } $('gameView').classList.add('hidden'); $('launcher').classList.remove('hidden'); }
+function returnToLauncher() { if (state.game) { state.game.stop(); state.game=null; } if (state.creator) { state.creator.stop(); state.creator=null; } $('gameView').classList.add('hidden'); $('launcher').classList.remove('hidden'); }
+
+
+class ChartCreator {
+  constructor(audioFile, options) {
+    this.audioFile = audioFile;
+    this.title = options.title || stripAudioExt(audioFile.name);
+    this.difficulty = options.difficulty || 'normal';
+    this.laneCount = this.difficulty === 'master' ? 6 : 4;
+    this.bpm = Number(options.bpm || state.settings.manualBpm || 120) || 120;
+    this.audioUrl = URL.createObjectURL(audioFile);
+    this.audio = new Audio(this.audioUrl);
+    this.audio.preload = 'auto';
+    this.canvas = $('gameCanvas');
+    this.ctx = this.canvas.getContext('2d');
+    this.laneHeld = Array(this.laneCount).fill(false);
+    this.pressStart = Array(this.laneCount).fill(null);
+    this.notes = [];
+    this.flashUntil = Array(this.laneCount).fill(0);
+    this.finished = false;
+    this.touchMap = new Map();
+    this._raf = null;
+    this.boundKeyDown = e => this.onKeyDown(e);
+    this.boundKeyUp = e => this.onKeyUp(e);
+    this.boundTouchStart = e => this.onTouchStart(e);
+    this.boundTouchEnd = e => this.onTouchEnd(e);
+    this.boundResizeTouch = () => this.updateTouchLaneGeometry();
+  }
+  async start() {
+    $('launcher').classList.add('hidden');
+    $('gameView').classList.remove('hidden');
+    buildTouchLanes(this.laneCount);
+    this.updateTouchLaneGeometry();
+    requestAnimationFrame(() => this.updateTouchLaneGeometry());
+    window.addEventListener('resize', this.boundResizeTouch);
+    window.addEventListener('keydown', this.boundKeyDown);
+    window.addEventListener('keyup', this.boundKeyUp);
+    $('touchLanes').addEventListener('touchstart', this.boundTouchStart, { passive: false });
+    $('touchLanes').addEventListener('touchend', this.boundTouchEnd, { passive: false });
+    $('touchLanes').addEventListener('touchcancel', this.boundTouchEnd, { passive: false });
+    await this.audio.play();
+    this.loop();
+  }
+  stop() {
+    cancelAnimationFrame(this._raf);
+    this.audio.pause();
+    window.removeEventListener('resize', this.boundResizeTouch);
+    window.removeEventListener('keydown', this.boundKeyDown);
+    window.removeEventListener('keyup', this.boundKeyUp);
+    $('touchLanes').removeEventListener('touchstart', this.boundTouchStart);
+    $('touchLanes').removeEventListener('touchend', this.boundTouchEnd);
+    $('touchLanes').removeEventListener('touchcancel', this.boundTouchEnd);
+    URL.revokeObjectURL(this.audioUrl);
+  }
+  songTime() { return this.audio.currentTime + state.settings.globalOffsetMs / 1000; }
+  updateTouchLaneGeometry() { RhythmGame.prototype.updateTouchLaneGeometry.call(this); }
+  touchToLane(t) { return RhythmGame.prototype.touchToLane.call(this, t); }
+  keyToLane(e) {
+    const keys = this.laneCount >= 6 ? state.settings.keys6 : state.settings.keys4;
+    return keys.findIndex(k => keyMatches(e, k));
+  }
+  onKeyDown(e) {
+    if (keyMatches(e, state.settings.backKey)) { e.preventDefault(); this.finishAndDownload(); return; }
+    if (keyMatches(e, state.settings.pauseKey)) { e.preventDefault(); this.audio.paused ? this.audio.play() : this.audio.pause(); return; }
+    const lane = this.keyToLane(e);
+    if (lane >= 0 && !e.repeat) { e.preventDefault(); this.pressLane(lane); }
+  }
+  onKeyUp(e) { const lane = this.keyToLane(e); if (lane >= 0) { e.preventDefault(); this.releaseLane(lane); } }
+  onTouchStart(e) { e.preventDefault(); for (const t of e.changedTouches) { const lane = this.touchToLane(t); this.touchMap.set(t.identifier, lane); this.pressLane(lane); } }
+  onTouchEnd(e) { e.preventDefault(); for (const t of e.changedTouches) { const lane = this.touchMap.get(t.identifier); if (lane !== undefined) this.releaseLane(lane); this.touchMap.delete(t.identifier); } }
+  pressLane(lane) {
+    if (this.laneHeld[lane]) return;
+    this.laneHeld[lane] = true;
+    this.pressStart[lane] = this.songTime();
+    this.flashUntil[lane] = performance.now() + 160;
+    document.querySelectorAll('.touch-lane')[lane]?.classList.add('active');
+  }
+  releaseLane(lane) {
+    if (!this.laneHeld[lane]) return;
+    const start = this.pressStart[lane];
+    const end = this.songTime();
+    this.laneHeld[lane] = false;
+    this.pressStart[lane] = null;
+    document.querySelectorAll('.touch-lane')[lane]?.classList.remove('active');
+    if (start === null || !Number.isFinite(start)) return;
+    if (end - start >= 3.0) {
+      this.notes.push({ type: 'hold', lane, time: round4(start), end_time: round4(end), color: 'bright', scroll_speed: 720 });
+    } else {
+      this.notes.push({ type: 'tap', lane, time: round4(start), color: 'normal', scroll_speed: 720 });
+    }
+  }
+  loop() {
+    if (!this.finished && this.audio.ended) this.finishAndDownload();
+    this.draw();
+    this._raf = requestAnimationFrame(() => this.loop());
+  }
+  finishAndDownload() {
+    if (this.finished) { returnToLauncher(); return; }
+    for (let lane = 0; lane < this.laneCount; lane++) if (this.laneHeld[lane]) this.releaseLane(lane);
+    this.finished = true;
+    const duration = Number(this.audio.duration || this.songTime() || 0);
+    const chart = this.buildChart(duration);
+    const blob = new Blob([JSON.stringify(chart, null, 2)], { type: 'application/json;charset=utf-8' });
+    const filename = `${safeFileStem(this.title)}.${this.difficulty}.json`;
+    downloadBlob(blob, filename);
+    $('createStatus').textContent = `${filename} 저장됨 · ${chart.notes.length} notes`;
+    setTimeout(returnToLauncher, 600);
+  }
+  buildChart(duration) {
+    const beat = 60 / this.bpm;
+    const gridTimes = [];
+    for (let t = 0; t <= duration + 0.001; t += beat / 2) gridTimes.push(round4(t));
+    const notes = removeHoldOverlaps(this.notes.slice().sort((a,b) => a.time - b.time || a.lane - b.lane));
+    return {
+      version: 21,
+      generator: 'Rhythm4G Online Manual Editor',
+      title: this.title,
+      audio_path: `music/${this.audioFile.name}`,
+      difficulty: this.difficulty,
+      lanes: this.laneCount,
+      lane_count: this.laneCount,
+      duration: round4(duration),
+      tempo_bpm: round4(this.bpm),
+      beat_interval: round4(beat),
+      base_scroll_speed: 720,
+      scroll_speed: 720,
+      offset_ms: 0,
+      grid_times: gridTimes,
+      note_count: notes.length,
+      notes,
+    };
+  }
+  draw() {
+    const ctx = this.ctx, w = this.canvas.width, h = this.canvas.height;
+    ctx.clearRect(0,0,w,h);
+    const playX = w * 0.18, playW = w * 0.64, laneW = playW / this.laneCount;
+    const topY = h * 0.14, judgeY = h * 0.82;
+    const t = this.songTime();
+    const grad = ctx.createLinearGradient(0,0,0,h); grad.addColorStop(0,'#101837'); grad.addColorStop(1,'#050712'); ctx.fillStyle=grad; ctx.fillRect(0,0,w,h);
+    ctx.fillStyle='rgba(255,255,255,.035)'; ctx.fillRect(playX, topY, playW, judgeY-topY+42);
+    for (let i=0;i<=this.laneCount;i++){ const x=playX+i*laneW; ctx.strokeStyle='rgba(210,225,255,.15)'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(x,topY); ctx.lineTo(x,judgeY+42); ctx.stroke(); }
+    ctx.strokeStyle='#f1f5ff'; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(playX,judgeY); ctx.lineTo(playX+playW,judgeY); ctx.stroke();
+    for (let i=0;i<this.laneCount;i++) {
+      const x = playX + i*laneW;
+      if (this.laneHeld[i]) { ctx.fillStyle='rgba(124,199,255,.20)'; ctx.fillRect(x, topY, laneW, judgeY-topY+42); }
+      if (performance.now() < this.flashUntil[i]) { ctx.strokeStyle='rgba(255,255,255,.62)'; ctx.lineWidth=4; ctx.strokeRect(x+4, topY+4, laneW-8, judgeY-topY+34); }
+    }
+    for (const n of this.notes) {
+      const x = playX + n.lane*laneW + laneW*.15, width=laneW*.7;
+      if (n.type === 'hold') {
+        const y1=judgeY-(n.time-t)*720, y2=judgeY-(n.end_time-t)*720;
+        if (Math.max(y1,y2)<topY || Math.min(y1,y2)>judgeY+60) continue;
+        ctx.fillStyle='rgba(124,199,255,.24)'; roundRect(ctx,x+width*.25,Math.min(y1,y2),width*.5,Math.abs(y2-y1)+18,12,true,false);
+        ctx.fillStyle='#7cc7ff'; roundRect(ctx,x,y1-14,width,28,10,true,false); roundRect(ctx,x,y2-12,width*.8,24,10,true,false);
+      } else {
+        const y=judgeY-(n.time-t)*720; if (y<topY || y>judgeY+60) continue;
+        ctx.fillStyle='#9bffd0'; roundRect(ctx,x,y-14,width,28,10,true,false);
+      }
+    }
+    ctx.fillStyle='#eef3ff'; ctx.font='900 34px Malgun Gothic, sans-serif'; ctx.fillText('CHART EDITOR',34,54);
+    ctx.font='700 20px Malgun Gothic, sans-serif'; ctx.fillStyle='#b9c7e8'; ctx.fillText(`${this.title} · ${this.difficulty} · ${this.notes.length} notes`,34,86);
+    ctx.textAlign='center'; ctx.font='900 46px Malgun Gothic, sans-serif'; ctx.fillStyle='#ffffff'; ctx.fillText(`${Math.max(0,this.audio.duration - this.audio.currentTime || 0).toFixed(1)}s`,w/2,64);
+    ctx.font='700 22px Malgun Gothic, sans-serif'; ctx.fillStyle='#b9c7e8'; ctx.fillText('짧게 누르면 TAP · 3초 이상 누르면 HOLD · Back 키로 저장 종료',w/2,h-34); ctx.textAlign='left';
+  }
+}
+function round4(x) { return Math.round(Number(x || 0) * 10000) / 10000; }
+function stripAudioExt(name) { return String(name || 'song').replace(/\.[^.]+$/, ''); }
+function safeFileStem(name) { return stripAudioExt(name).replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim() || 'chart'; }
+function downloadBlob(blob, filename) { const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href); a.remove();}, 600); }
+function startCreator() {
+  uiToSettings();
+  if (!state.createAudio) { $('createStatus').textContent = '음악 파일을 선택하세요.'; return; }
+  const opts = { title: $('createTitleInput').value.trim() || stripAudioExt(state.createAudio.name), difficulty: $('createDifficultyInput').value, bpm: Number($('createBpmInput').value || state.settings.manualBpm || 120) };
+  if (state.game) { state.game.stop(); state.game=null; }
+  if (state.creator) { state.creator.stop(); state.creator=null; }
+  state.creator = new ChartCreator(state.createAudio, opts);
+  state.creator.start().catch(err => alert(`채보 제작 시작 실패: ${err.message || err}`));
+}
 
 
 async function toggleFullscreen() {
@@ -456,6 +646,8 @@ $('playSelectedBtn').onclick = playSelected;
 $('playLocalBtn').onclick = playLocal;
 $('localChartInput').onchange = e => { state.localChart = e.target.files[0]; $('localStatus').textContent = state.localChart?.name || ''; };
 $('localAudioInput').onchange = e => { state.localAudio = e.target.files[0]; $('localStatus').textContent = [state.localChart?.name, state.localAudio?.name].filter(Boolean).join(' + '); };
+$('createAudioInput').onchange = e => { state.createAudio = e.target.files[0]; $('createStatus').textContent = state.createAudio?.name || ''; if (state.createAudio && !$('createTitleInput').value) $('createTitleInput').value = stripAudioExt(state.createAudio.name); };
+$('startCreatorBtn').onclick = startCreator;
 $('openSettingsBtn').onclick = () => { settingsToUI(); $('settingsDialog').showModal(); };
 $('saveSettingsBtn').onclick = uiToSettings;
 $('resetSettingsBtn').onclick = () => { state.settings = { ...DEFAULT_SETTINGS }; saveSettings(); settingsToUI(); };
