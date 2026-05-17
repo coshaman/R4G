@@ -174,32 +174,127 @@ async function loadUrl(chartUrl, audioUrl){
   setStatus("로드 완료");
 }
 
-async function loadManifest(){
-  const box = $("manifestList");
+function normalizePath(p){ return String(p || "").replace(/\\/g, "/").replace(/^\.\//, ""); }
+function difficultyRank(d){ return {easy:0, normal:1, hard:2, extreme:3, master:4}[String(d||"").toLowerCase()] ?? 99; }
+function guessDifficultyFromPath(path){
+  const name = normalizePath(path).split("/").pop() || path;
+  const m = name.match(/\.(easy|normal|hard|extreme|master)\.json$/i);
+  return m ? m[1].toLowerCase() : "chart";
+}
+async function fetchJsonMaybe(path){
+  const res = await fetch(path, { cache:"no-store" });
+  if (!res.ok) throw new Error(`${path} 로드 실패`);
+  return await res.json();
+}
+async function tryDirectoryListing(dir, exts){
   try {
-    const res = await fetch("manifest.json", { cache:"no-store" });
-    if (!res.ok) throw new Error("manifest 없음");
-    const data = await res.json();
-    const songs = Array.isArray(data.songs) ? data.songs : [];
-    box.innerHTML = songs.length ? "" : `<div class="manifest-item"><small>manifest.json에 곡이 없습니다.</small></div>`;
-    for (const s of songs) {
-      const item = document.createElement("div");
-      item.className = "manifest-item";
-      const diffs = Array.isArray(s.charts) ? s.charts.map(c=>c.difficulty || "chart").join(" / ") : "";
-      item.innerHTML = `<div><b>${escapeHtml(s.title || s.audio || "Untitled")}</b><small>${escapeHtml(diffs)}</small></div>`;
-      const btn = document.createElement("button"); btn.textContent = "선택";
+    const res = await fetch(dir, { cache:"no-store" });
+    if (!res.ok) return [];
+    const html = await res.text();
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const files = [...doc.querySelectorAll("a")]
+      .map(a => a.getAttribute("href") || "")
+      .map(h => decodeURIComponent(h.split("?")[0].split("#")[0]))
+      .filter(h => h && !h.startsWith("../") && !h.endsWith("/"))
+      .filter(h => exts.some(ext => h.toLowerCase().endsWith(ext)))
+      .map(h => normalizePath(dir + h.split("/").pop()));
+    return [...new Set(files)];
+  } catch { return []; }
+}
+function basenameNoExt(path){
+  const name = normalizePath(path).split("/").pop() || path;
+  return name.replace(/\.[^.]+$/, "");
+}
+function stripDifficultySuffix(name){
+  return name.replace(/\.(easy|normal|hard|extreme|master)$/i, "");
+}
+async function buildManifestFromDirectoryListing(){
+  const [audioFiles, chartFiles] = await Promise.all([
+    tryDirectoryListing("music/", [".mp3", ".wav", ".ogg", ".m4a", ".flac"]),
+    tryDirectoryListing("charts/", [".json"]),
+  ]);
+  if (!audioFiles.length && !chartFiles.length) return null;
+
+  const audioByStem = new Map(audioFiles.map(p => [basenameNoExt(p), p]));
+  const groups = new Map();
+  for (const chartPath of chartFiles) {
+    let meta = {};
+    try { meta = await fetchJsonMaybe(chartPath); } catch {}
+    const chartStem = stripDifficultySuffix(basenameNoExt(chartPath));
+    const audioPath = normalizePath(meta.audio_path || audioByStem.get(chartStem) || `music/${chartStem}.mp3`);
+    const key = audioPath || chartStem;
+    if (!groups.has(key)) groups.set(key, { title: meta.title || chartStem, audio: audioPath, charts: [] });
+    const song = groups.get(key);
+    song.title = song.title || meta.title || chartStem;
+    song.charts.push({
+      difficulty: meta.difficulty || guessDifficultyFromPath(chartPath),
+      path: chartPath,
+      bpm: meta.tempo_bpm,
+      notes: Array.isArray(meta.notes) ? meta.notes.length : undefined,
+    });
+  }
+  const songs = [...groups.values()].map(s => ({ ...s, charts: s.charts.sort((a,b)=>difficultyRank(a.difficulty)-difficultyRank(b.difficulty)) }));
+  return { generated_by: "directory-listing", songs };
+}
+function renderManifestSongs(songs, sourceLabel){
+  const box = $("manifestList");
+  box.innerHTML = "";
+  if (!songs.length) {
+    box.innerHTML = `<div class="manifest-item"><small>곡이 없습니다. music/와 charts/에 파일을 넣고 manifest를 생성하세요.</small></div>`;
+    return;
+  }
+  const source = document.createElement("div");
+  source.className = "manifest-source";
+  source.textContent = sourceLabel;
+  box.appendChild(source);
+  for (const s of songs) {
+    const item = document.createElement("div");
+    item.className = "manifest-item song-card";
+    const title = document.createElement("div");
+    title.className = "manifest-song-title";
+    title.innerHTML = `<b>${escapeHtml(s.title || s.audio || "Untitled")}</b><small>${escapeHtml(s.audio || "음악 경로 없음")}</small>`;
+    const buttons = document.createElement("div");
+    buttons.className = "difficulty-buttons";
+    const charts = (Array.isArray(s.charts) ? s.charts : []).slice().sort((a,b)=>difficultyRank(a.difficulty)-difficultyRank(b.difficulty));
+    for (const c of charts) {
+      const btn = document.createElement("button");
+      const label = c.difficulty || guessDifficultyFromPath(c.path || "");
+      btn.textContent = label;
+      btn.title = c.path || "";
       btn.onclick = async () => {
-        const chartEntry = Array.isArray(s.charts) ? s.charts[0] : null;
-        if (!chartEntry) return alert("charts 항목이 없습니다.");
-        try { await loadUrl(chartEntry.path, s.audio); }
+        if (!c.path) return alert("chart path가 없습니다.");
+        if (!s.audio) return alert("audio path가 없습니다. manifest 또는 chart의 audio_path를 확인하세요.");
+        try { await loadUrl(c.path, s.audio); }
         catch(e){ alert(e.message); setStatus("로드 실패"); }
       };
-      item.appendChild(btn); box.appendChild(item);
+      buttons.appendChild(btn);
     }
-  } catch {
-    box.innerHTML = `<div class="manifest-item"><small>manifest.json이 없으면 로컬 파일 또는 직접 경로 입력을 사용하세요.</small></div>`;
+    if (!charts.length) buttons.innerHTML = `<small>채보 없음</small>`;
+    item.appendChild(title); item.appendChild(buttons); box.appendChild(item);
   }
 }
+async function loadManifest(){
+  const box = $("manifestList");
+  box.innerHTML = `<div class="manifest-item"><small>music/ · charts/ 목록 읽는 중...</small></div>`;
+  try {
+    const res = await fetch("manifest.json", { cache:"no-store" });
+    if (res.ok) {
+      const data = await res.json();
+      const songs = Array.isArray(data.songs) ? data.songs : [];
+      renderManifestSongs(songs, "manifest.json에서 자동 로드됨");
+      return;
+    }
+  } catch {}
+
+  const dirManifest = await buildManifestFromDirectoryListing();
+  if (dirManifest) {
+    renderManifestSongs(dirManifest.songs || [], "디렉터리 목록에서 자동 감지됨 · GitHub Pages에서는 manifest.json 생성 필요");
+    return;
+  }
+
+  box.innerHTML = `<div class="manifest-item"><small>자동 목록을 읽지 못했습니다. GitHub Pages에서는 scripts/generate_manifest.py 또는 제공된 GitHub Actions가 생성한 manifest.json이 필요합니다.</small></div>`;
+}
+
 
 class RhythmGame {
   constructor(canvas, chart, audioBuffer, settings){
