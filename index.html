@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1020" />
+  <title>Rhythm4G Online</title>
+  <link rel="stylesheet" href="src/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div>
+        <div class="brand">Rhythm4G <span>Online</span></div>
+        <div class="subbrand">JSON chart player · frontend only</div>
+      </div>
+      <div class="status-pill" id="loadStatus">대기 중</div>
+    </header>
+
+    <main class="layout" id="mainLayout">
+      <section class="panel library-panel">
+        <div class="panel-title">곡 / 채보 불러오기</div>
+        <p class="hint">서버 없이 브라우저에서만 동작합니다. 같은 디렉토리 파일은 manifest 또는 URL 파라미터로, 로컬 파일은 직접 선택해서 불러올 수 있습니다.</p>
+
+        <div class="load-grid">
+          <label class="file-card">
+            <span>채보 JSON</span>
+            <input id="chartFile" type="file" accept=".json,application/json" />
+          </label>
+          <label class="file-card">
+            <span>음악 파일</span>
+            <input id="audioFile" type="file" accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac" />
+          </label>
+        </div>
+
+        <div class="same-dir-box">
+          <div class="section-label">같은 디렉토리에서 가져오기</div>
+          <div class="inline-row">
+            <input id="chartUrl" placeholder="charts/song.hard.json" />
+            <input id="audioUrl" placeholder="music/song.mp3" />
+          </div>
+          <button id="loadUrlBtn" class="secondary-btn">경로로 불러오기</button>
+        </div>
+
+        <div class="manifest-box">
+          <div class="section-label">manifest.json 곡 목록</div>
+          <div class="manifest-list" id="manifestList"></div>
+          <button id="reloadManifestBtn" class="secondary-btn">manifest 다시 읽기</button>
+        </div>
+      </section>
+
+      <section class="panel settings-panel">
+        <div class="panel-title">전역 설정</div>
+        <div class="settings-grid">
+          <label>
+            <span>싱크 오프셋(ms)</span>
+            <input id="offsetInput" type="number" step="1" value="0" />
+          </label>
+          <label>
+            <span>노트 속도 배율</span>
+            <input id="speedInput" type="number" step="0.05" min="0.4" max="2.5" value="1.0" />
+          </label>
+          <label>
+            <span>BPM 수동 표시/그리드</span>
+            <input id="bpmInput" type="number" step="0.01" min="30" max="360" placeholder="자동" />
+          </label>
+          <label>
+            <span>ACC 방식</span>
+            <select id="accModeInput">
+              <option value="cumulative">누적</option>
+              <option value="from100">100% 시작</option>
+            </select>
+          </label>
+        </div>
+        <label class="toggle-row">
+          <input id="autoSyncInput" type="checkbox" />
+          <span>자동 싱크 사용</span>
+        </label>
+
+        <div class="key-panel">
+          <div class="section-label">키 설정</div>
+          <div class="key-grid">
+            <label>4키 <input id="keys4Input" value="D F J K" /></label>
+            <label>6키 <input id="keys6Input" value="S D F J K L" /></label>
+            <label>일시정지 <input id="pauseKeyInput" value="P" /></label>
+            <label>리트라이 <input id="retryKeyInput" value="Backspace" /></label>
+          </div>
+          <button id="saveSettingsBtn" class="secondary-btn">설정 저장</button>
+        </div>
+
+        <div class="song-info" id="songInfo">
+          <div class="empty-state">채보와 음악을 불러오면 정보가 표시됩니다.</div>
+        </div>
+
+        <button id="startBtn" class="primary-btn" disabled>플레이 시작</button>
+      </section>
+    </main>
+
+    <section class="game-shell hidden" id="gameShell">
+      <canvas id="gameCanvas" width="1280" height="720"></canvas>
+      <div class="touch-lanes" id="touchLanes"></div>
+      <div class="game-controls">
+        <button id="pauseBtn">Pause</button>
+        <button id="retryBtn">Retry</button>
+        <button id="backBtn">Back</button>
+      </div>
+    </section>
+  </div>
+
+  <script src="src/app.js" type="module"></script>
+</body>
+</html>

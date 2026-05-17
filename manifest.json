@@ -1,0 +1,11 @@
+{
+  "songs": [
+    {
+      "title": "Example Song",
+      "audio": "music/example.mp3",
+      "charts": [
+        { "difficulty": "hard", "path": "charts/example.hard.json" }
+      ]
+    }
+  ]
+}
