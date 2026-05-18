@@ -203,6 +203,9 @@ class RhythmGame {
     this.hitUnits = 0;
     this.combo = 0; this.maxCombo = 0; this.score = 0;
     this.counts = { PERFECT: 0, GREAT: 0, GOOD: 0, BAD: 0, MISS: 0, RELEASE: 0 };
+    this.timingCounts = { FAST: 0, SLOW: 0, CENTER: 0 };
+    this.timingErrors = [];
+    this.timingText = ''; this.timingUntil = 0;
     this.judgeText = ''; this.judgeUntil = 0;
     this.autoSamples = []; this.autoAdjust = 0; this.autoCount = 0; this.lastAutoAt = 0;
     this.finished = false;
@@ -311,9 +314,23 @@ class RhythmGame {
     const roll = this.chart.notes.find(n => n.type === 'roll' && !n.hit && !n.missed && t >= n.time && t <= n.end_time);
     if (roll) { roll.rollHits += 1; roll.pulseUntil = performance.now() + 180; this.rollShakeUntil = performance.now() + 90; this.flash(`ROLL ${Math.max(0, roll.required_hits - roll.rollHits)}`); if (roll.rollHits >= roll.required_hits) this.applyJudgment(roll, 'PERFECT', 1, true); return; }
     const hold = this.closestNote(lane, 'hold', t, JUDGE.bad);
-    if (hold && !hold.started) { hold.started = true; this.activeHolds.set(hold, true); this.applyJudgment(hold, this.judgeFor(Math.abs(t - hold.time)), 1, false); return; }
+    if (hold && !hold.started) {
+      hold.started = true; this.activeHolds.set(hold, true);
+      const diff = t - hold.time;
+      const judge = this.judgeFor(Math.abs(diff));
+      this.registerTimingFeedback(diff);
+      this.applyJudgment(hold, judge, 1, false);
+      this.autoSyncSample(diff, t);
+      return;
+    }
     const tap = this.closestNote(lane, 'tap', t, JUDGE.bad);
-    if (tap) { this.applyJudgment(tap, this.judgeFor(Math.abs(t - tap.time)), 1, true); this.autoSyncSample(t - tap.time, t); return; }
+    if (tap) {
+      const diff = t - tap.time;
+      this.registerTimingFeedback(diff);
+      this.applyJudgment(tap, this.judgeFor(Math.abs(diff)), 1, true);
+      this.autoSyncSample(diff, t);
+      return;
+    }
   }
   releaseLane(lane) {
     this.laneHeld[lane] = false;
@@ -331,6 +348,33 @@ class RhythmGame {
       if (d <= window && d < bestD) { best = n; bestD = d; }
     }
     return best;
+  }
+  registerTimingFeedback(diff) {
+    if (!Number.isFinite(diff) || Math.abs(diff) > JUDGE.miss) return;
+    this.timingErrors.push(diff);
+    if (this.timingErrors.length > 240) this.timingErrors.shift();
+    const threshold = 0.012;
+    if (diff <= -threshold) {
+      this.timingCounts.FAST += 1;
+      this.timingText = `FAST ${Math.round(diff * 1000)}ms`;
+      this.timingUntil = performance.now() + 420;
+    } else if (diff >= threshold) {
+      this.timingCounts.SLOW += 1;
+      this.timingText = `SLOW +${Math.round(diff * 1000)}ms`;
+      this.timingUntil = performance.now() + 420;
+    } else {
+      this.timingCounts.CENTER += 1;
+      this.timingText = '';
+    }
+  }
+  timingSummary() {
+    const fast = this.timingCounts.FAST || 0;
+    const slow = this.timingCounts.SLOW || 0;
+    const center = this.timingCounts.CENTER || 0;
+    const avgMs = this.timingErrors.length ? this.timingErrors.reduce((a,b)=>a+b,0) / this.timingErrors.length * 1000 : 0;
+    const recommended = Math.round((state.settings.globalOffsetMs || 0) + avgMs);
+    const total = Math.max(1, fast + slow + center);
+    return { fast, slow, center, avgMs, recommended, total };
   }
   judgeFor(d) { if (d <= JUDGE.perfect) return 'PERFECT'; if (d <= JUDGE.great) return 'GREAT'; if (d <= JUDGE.good) return 'GOOD'; return 'BAD'; }
   applyJudgment(note, judgment, units = 1, finish = true) {
@@ -400,11 +444,27 @@ class RhythmGame {
     for (const n of this.chart.notes) this.drawNote(ctx, n, t, playX, laneW, judgeY, topY, speedMul);
     ctx.fillStyle = '#eef3ff'; ctx.font = '800 34px Malgun Gothic, Noto Sans CJK KR, sans-serif'; ctx.fillText(String(this.score).padStart(7,'0'), 34, 54);
     ctx.font = '900 46px Malgun Gothic, sans-serif'; ctx.textAlign='center'; ctx.fillText(`${this.combo} COMBO`, w/2, 62); ctx.textAlign='left';
-    const acc = this.acc(); ctx.font = '700 24px Malgun Gothic, sans-serif'; ctx.fillStyle='#b9c7e8'; ctx.fillText(`ACC ${acc.toFixed(2)}%`, 34, 88);
+    const acc = this.acc(); const tsHud = this.timingSummary(); ctx.font = '700 24px Malgun Gothic, sans-serif'; ctx.fillStyle='#b9c7e8'; ctx.fillText(`ACC ${acc.toFixed(2)}%   FAST ${tsHud.fast} / SLOW ${tsHud.slow}`, 34, 88);
     ctx.fillText(this.chart.title || 'Untitled', 34, h-34);
     if (performance.now() < this.judgeUntil) { ctx.font='900 48px Malgun Gothic, sans-serif'; ctx.textAlign='center'; ctx.fillStyle='#9bffd0'; ctx.fillText(this.judgeText, w/2, h*0.34); ctx.textAlign='left'; }
+    if (performance.now() < this.timingUntil && this.timingText) { ctx.font='800 24px Malgun Gothic, sans-serif'; ctx.textAlign='center'; ctx.fillStyle=this.timingText.startsWith('FAST') ? '#7cc7ff' : '#ffb27e'; ctx.fillText(this.timingText, w/2, h*0.40); ctx.textAlign='left'; }
     ctx.restore();
-    if (this.paused || this.finished) { ctx.fillStyle='rgba(0,0,0,.62)'; ctx.fillRect(0,0,w,h); ctx.fillStyle='#fff'; ctx.font='900 64px Malgun Gothic, sans-serif'; ctx.textAlign='center'; ctx.fillText(this.finished ? 'RESULT' : 'PAUSED', w/2, h*.38); ctx.font='700 28px Malgun Gothic, sans-serif'; ctx.fillText(`SCORE ${this.score} · MAX COMBO ${this.maxCombo} · ACC ${acc.toFixed(2)}%`, w/2, h*.48); ctx.fillText('Back: 목록 · Retry: 재시작 · Pause: 계속', w/2, h*.56); ctx.textAlign='left'; }
+    if (this.paused || this.finished) {
+      const ts = this.timingSummary();
+      ctx.fillStyle='rgba(4,6,16,.76)'; ctx.fillRect(0,0,w,h);
+      const px=w*0.23, py=h*0.16, pw=w*0.54, ph=h*0.66;
+      ctx.fillStyle='rgba(18,26,54,.96)'; ctx.strokeStyle='rgba(124,199,255,.38)'; ctx.lineWidth=2; roundRect(ctx, px, py, pw, ph, 28, true, true);
+      ctx.fillStyle='#fff'; ctx.font='900 60px Malgun Gothic, sans-serif'; ctx.textAlign='center'; ctx.fillText(this.finished ? 'RESULT' : 'PAUSED', w/2, py+78);
+      ctx.fillStyle='#ffe7aa'; ctx.font='900 44px Malgun Gothic, sans-serif'; ctx.fillText(`${this.score.toLocaleString()}`, w/2, py+142);
+      ctx.fillStyle='#eaf0ff'; ctx.font='700 25px Malgun Gothic, sans-serif';
+      ctx.fillText(`MAX COMBO ${this.maxCombo}x   ACC ${acc.toFixed(2)}%`, w/2, py+196);
+      ctx.fillStyle='#9fd2ff';
+      ctx.fillText(`FAST ${ts.fast} (${(ts.fast/ts.total*100).toFixed(1)}%)   SLOW ${ts.slow} (${(ts.slow/ts.total*100).toFixed(1)}%)`, w/2, py+244);
+      ctx.fillText(`TIMING BIAS ${ts.avgMs >= 0 ? '+' : ''}${ts.avgMs.toFixed(1)}ms   RECOMMENDED OFFSET ${ts.recommended >= 0 ? '+' : ''}${ts.recommended}ms`, w/2, py+288);
+      ctx.fillStyle='#cfd8f7'; ctx.font='700 22px Malgun Gothic, sans-serif';
+      ctx.fillText('Back: 목록 · Retry: 재시작 · Pause: 계속', w/2, py+354);
+      ctx.textAlign='left';
+    }
   }
   drawNote(ctx, n, t, playX, laneW, judgeY, topY, speedMul) {
     if (n.hit || n.missed) return;

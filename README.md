@@ -38,3 +38,9 @@ python -m http.server 8000
 ## GitHub Pages
 
 Repository Settings → Pages → Build and deployment → Source를 `GitHub Actions`로 설정합니다.
+
+
+## v8 notes
+- Launcher UI has been redesigned for faster song access and better mobile layout.
+- Gameplay now shows FAST/SLOW timing feedback.
+- Result screen shows FAST/SLOW ratio and a recommended offset value.

@@ -9,93 +9,87 @@
 <body>
   <div id="app" class="app-shell">
     <header class="topbar">
-      <div>
+      <div class="brand-block">
         <div class="brand">Rhythm4G <span>Online</span></div>
-        <div class="subtitle">Developer: 집돌이 페렐만</div>
+        <div class="subtitle">집돌이 페렐만</div>
       </div>
-      <nav class="top-actions">
+      <nav class="top-actions" aria-label="바로가기">
         <a class="link-btn" href="https://drive.google.com/file/d/16K75hilq63fbOOWtmtmwqpYPxXOkQl-s/view?usp=drive_link" target="_blank" rel="noopener noreferrer">채보 제작 프로그램</a>
-        <a class="link-btn" href="https://www.coshaman.com" target="_blank" rel="noopener noreferrer">개발자 포트폴리오</a>
+        <a class="link-btn" href="https://www.coshaman.com" target="_blank" rel="noopener noreferrer">포트폴리오</a>
         <button id="openSettingsBtn" class="ghost-btn">설정</button>
       </nav>
     </header>
 
     <main id="launcher" class="launcher">
-      <section class="hero-card">
-        <div>
-          <h1>Rhythm4G Online</h1>
-          <p>온라인 라이브러리에서 곡을 고르거나, 로컬의 채보와 음악 파일을 직접 선택해 플레이합니다.</p>
-          <div class="hero-links">
-            <a href="https://drive.google.com/file/d/16K75hilq63fbOOWtmtmwqpYPxXOkQl-s/view?usp=drive_link" target="_blank" rel="noopener noreferrer">채보 제작 프로그램 다운로드</a>
-            <a href="https://www.coshaman.com" target="_blank" rel="noopener noreferrer">집돌이 페렐만 포트폴리오</a>
-          </div>
+      <section class="quickbar">
+        <div class="status-pill">
+          <span>라이브러리</span>
+          <strong id="libraryStatus">불러오는 중...</strong>
         </div>
-        <div class="status-box">
-          <div class="status-label">라이브러리</div>
-          <div id="libraryStatus" class="status-value">불러오는 중...</div>
+        <div class="selected-strip">
+          <span>선택</span>
+          <div id="selectedInfo" class="selected-info">아직 선택된 곡이 없습니다.</div>
         </div>
+        <button id="playSelectedBtn" class="primary-btn play-now" disabled>선택한 채보 플레이</button>
       </section>
 
-      <section class="grid-layout">
+      <section class="dashboard">
         <section class="panel library-panel">
-          <div class="panel-head">
+          <div class="panel-head compact-head">
             <div>
-              <h2>온라인 라이브러리</h2>
-              <p>등록된 곡과 채보를 선택해 바로 플레이합니다.</p>
+              <h1>온라인 라이브러리</h1>
+              <p>등록된 곡을 선택하면 바로 플레이할 수 있습니다.</p>
             </div>
             <button id="refreshLibraryBtn" class="small-btn">새로고침</button>
           </div>
           <div id="songList" class="song-list"></div>
         </section>
 
-        <aside class="panel side-panel">
-          <h2>로컬 파일로 플레이</h2>
-          <p>채보 JSON과 음악 파일을 선택합니다. 파일은 서버로 업로드되지 않습니다.</p>
-          <label class="file-row">
-            <span>채보 JSON</span>
-            <input id="localChartInput" type="file" accept=".json,application/json" />
-          </label>
-          <label class="file-row">
-            <span>음악 파일</span>
-            <input id="localAudioInput" type="file" accept="audio/*,.mp3,.wav,.ogg,.flac,.m4a" />
-          </label>
-          <button id="playLocalBtn" class="primary-btn full">로컬 파일 플레이</button>
-          <div id="localStatus" class="hint"></div>
+        <aside class="side-stack">
+          <section class="panel action-panel">
+            <h2>로컬 파일 플레이</h2>
+            <label class="file-row">
+              <span>채보 JSON</span>
+              <input id="localChartInput" type="file" accept=".json,application/json" />
+            </label>
+            <label class="file-row">
+              <span>음악 파일</span>
+              <input id="localAudioInput" type="file" accept="audio/*,.mp3,.wav,.ogg,.flac,.m4a" />
+            </label>
+            <button id="playLocalBtn" class="primary-btn full">로컬 파일 플레이</button>
+            <div id="localStatus" class="hint"></div>
+          </section>
 
-          <hr />
-
-          <h2>자작 채보 제작</h2>
-          <p>음악을 재생하면서 키보드/터치 입력을 그대로 채보로 기록합니다. 3초 이상 누르면 롱노트로 저장됩니다.</p>
-          <label class="file-row">
-            <span>음악 파일</span>
-            <input id="createAudioInput" type="file" accept="audio/*,.mp3,.wav,.ogg,.flac,.m4a" />
-          </label>
-          <label class="file-row">
-            <span>곡 제목</span>
-            <input id="createTitleInput" type="text" placeholder="비워두면 파일명 사용" />
-          </label>
-          <label class="file-row">
-            <span>난이도</span>
-            <select id="createDifficultyInput">
-              <option value="easy">easy</option>
-              <option value="normal" selected>normal</option>
-              <option value="hard">hard</option>
-              <option value="extreme">extreme</option>
-              <option value="master">master</option>
-            </select>
-          </label>
-          <label class="file-row">
-            <span>BPM</span>
-            <input id="createBpmInput" type="number" step="0.01" min="40" max="260" placeholder="120" />
-          </label>
-          <button id="startCreatorBtn" class="primary-btn full">채보 제작 시작</button>
-          <div id="createStatus" class="hint"></div>
-
-          <hr />
-
-          <h2>선택한 곡</h2>
-          <div id="selectedInfo" class="selected-info">아직 선택된 곡이 없습니다.</div>
-          <button id="playSelectedBtn" class="primary-btn full" disabled>선택한 채보 플레이</button>
+          <section class="panel action-panel">
+            <h2>자작 채보 제작</h2>
+            <p>음악을 재생하며 입력한 키를 채보로 기록합니다. 3초 이상 누르면 롱노트로 저장됩니다.</p>
+            <label class="file-row">
+              <span>음악 파일</span>
+              <input id="createAudioInput" type="file" accept="audio/*,.mp3,.wav,.ogg,.flac,.m4a" />
+            </label>
+            <label class="file-row inline-field">
+              <span>곡 제목</span>
+              <input id="createTitleInput" type="text" placeholder="비워두면 파일명 사용" />
+            </label>
+            <div class="two-cols">
+              <label class="file-row">
+                <span>난이도</span>
+                <select id="createDifficultyInput">
+                  <option value="easy">easy</option>
+                  <option value="normal" selected>normal</option>
+                  <option value="hard">hard</option>
+                  <option value="extreme">extreme</option>
+                  <option value="master">master</option>
+                </select>
+              </label>
+              <label class="file-row">
+                <span>BPM</span>
+                <input id="createBpmInput" type="number" step="0.01" min="40" max="260" placeholder="120" />
+              </label>
+            </div>
+            <button id="startCreatorBtn" class="primary-btn full">채보 제작 시작</button>
+            <div id="createStatus" class="hint"></div>
+          </section>
         </aside>
       </section>
     </main>
@@ -103,7 +97,7 @@
     <section id="gameView" class="game-view hidden">
       <canvas id="gameCanvas" width="1280" height="720"></canvas>
       <div class="game-actions">
-        <button id="backToLauncherBtn" class="ghost-btn">목록으로</button>
+        <button id="backToLauncherBtn" class="ghost-btn">목록</button>
         <button id="fullscreenBtn" class="ghost-btn">전체화면</button>
       </div>
       <div id="touchLanes" class="touch-lanes"></div>
